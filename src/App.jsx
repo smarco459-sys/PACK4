@@ -175,7 +175,7 @@ function Dashboard({workspace}) {
   },[workspace?.id]);
 
   return <div>
-    <Header title="Dashboard" subtitle="Visão geral do departamento técnico • dados em tempo real"
+    <Header title="Dashboard" subtitle="Acompanhe a operação técnica e tome decisões com dados em tempo real"
       action={<button className="icon-btn" onClick={()=>location.reload()}><RefreshCw size={17}/></button>}/>
     <div className="kpis">
       <Kpi icon={Clock3} label="Pendentes" value={m.data?.pending_services ?? "—"}/>

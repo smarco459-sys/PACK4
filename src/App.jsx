@@ -84,16 +84,23 @@ function Shell({ session }) {
     if (!workspace?.id) return;
     const tables = ["clients", "technicians", "parts", "services", "technician_availability"];
     const channel = supabase.channel(`workspace-live-${workspace.id}`);
+    const refreshData = () => setRefresh((value) => value + 1);
     tables.forEach((table) => {
       channel.on("postgres_changes", {
         event: "*", schema: "public", table,
         filter: `workspace_id=eq.${workspace.id}`,
-      }, () => setRefresh((value) => value + 1));
+      }, refreshData);
+    });
+    // Estas tabelas não têm workspace_id; a autorização é feita pela relação com services.
+    ["service_parts", "service_history"].forEach((table) => {
+      channel.on("postgres_changes", {
+        event: "*", schema: "public", table,
+      }, refreshData);
     });
     channel.on("postgres_changes", {
       event: "*", schema: "public", table: "workspace_members",
       filter: `workspace_id=eq.${workspace.id}`,
-    }, () => setRefresh((value) => value + 1));
+    }, refreshData);
     channel.subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [workspace?.id]);

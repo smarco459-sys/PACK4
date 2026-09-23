@@ -301,6 +301,7 @@ function Clients({workspace,setRefresh}) {
   const [form,setForm]=useState({name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""});
   async function load(){if(!workspace?.id)return; const {data}=await supabase.from("clients").select("*").eq("workspace_id",workspace.id).order("name");setRows(data||[])}
   useEffect(()=>{load()},[workspace?.id]);
+  useEffect(()=>{if(!workspace?.id)return;const channel=supabase.channel(`clients-live-${workspace.id}`).on("postgres_changes",{event:"*",schema:"public",table:"clients",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(channel)},[workspace?.id]);
   async function save(e){e.preventDefault();const {error}=await supabase.from("clients").insert({...form,workspace_id:workspace.id});if(error)alert(error.message);else{setOpen(false);setForm({name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""});load();setRefresh?.(x=>x+1)}}
   const f=rows.filter(x=>(x.name+" "+(x.city||"")+" "+(x.phone||"")).toLowerCase().includes(q.toLowerCase()));
   function maps(c){const query=[c.address,c.postal_code,c.city].filter(Boolean).join(", ");return query?`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`:null}
@@ -312,9 +313,25 @@ function Clients({workspace,setRefresh}) {
 }
 
 function Technicians({workspace}) {
-  const d=useData(async()=>{if(!workspace?.id)return[];const {data,error}=await supabase.from("technician_workload").select("*").eq("workspace_id",workspace.id).order("name");if(error)throw error;return data||[]},[workspace?.id]);
-  return <div><Header title="Técnicos" subtitle="Carga, disponibilidade e serviços em aberto"/><div className="cards-grid">{d.data?.map(t=><div className="panel tech-card" key={t.technician_id}><div className="tech-title"><div className="avatar big">{t.name.slice(0,1)}</div><div><h2>{t.name}</h2><span className="status green">Ativo</span></div></div><div className="statline"><span>Em curso</span><strong>{t.active_services}</strong></div><div className="statline"><span>Hoje</span><strong>{t.today_services}</strong></div><div className="statline"><span>Esta semana</span><strong>{t.week_services}</strong></div><div className="statline"><span>Em aberto</span><strong>{t.open_services}</strong></div></div>)}{!d.data?.length&&!d.loading&&<div className="panel empty">Ainda não existem técnicos associados ao workspace.</div>}</div></div>
+  const d=useData(async()=>{
+    if(!workspace?.id)return[];
+    const monday=new Date(); monday.setHours(0,0,0,0); const day=monday.getDay(); monday.setDate(monday.getDate()+(day===0?-6:1-day));
+    const friday=new Date(monday); friday.setDate(friday.getDate()+5);
+    const [techResult,serviceResult]=await Promise.all([
+      supabase.from("technicians").select("id,name,active,email,phone").eq("workspace_id",workspace.id).order("name"),
+      supabase.from("services").select("technician_id,status,scheduled_start,invoiced").eq("workspace_id",workspace.id).gte("scheduled_start",monday.toISOString()).lt("scheduled_start",friday.toISOString())
+    ]);
+    if(techResult.error)throw techResult.error; if(serviceResult.error)throw serviceResult.error;
+    const start=todayStart(); const end=new Date(start); end.setDate(end.getDate()+1);
+    return (techResult.data||[]).map(t=>{const rows=(serviceResult.data||[]).filter(s=>s.technician_id===t.id);return {...t,technician_id:t.id,open_services:rows.filter(s=>!['completed','cancelled'].includes(s.status)&&!s.invoiced).length,active_services:rows.filter(s=>s.status==='in_progress').length,week_services:rows.length,today_services:rows.filter(s=>s.scheduled_start&&new Date(s.scheduled_start)>=start&&new Date(s.scheduled_start)<end).length};});
+  },[workspace?.id]);
+  useEffect(()=>{if(!workspace?.id)return;const channel=supabase.channel(`technicians-live-${workspace.id}`).on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},d.reload).on("postgres_changes",{event:"*",schema:"public",table:"technicians",filter:`workspace_id=eq.${workspace.id}`},d.reload).subscribe();return()=>supabase.removeChannel(channel)},[workspace?.id]);
+  return <div><Header title="Técnicos" subtitle="Carga semanal, disponibilidade e serviços em aberto"/><div className="cards-grid">{d.data?.map(t=><div className="panel tech-card" key={t.technician_id}><div className="tech-title"><div className="avatar big">{t.name.slice(0,1)}</div><div><h2>{t.name}</h2><span className={`status ${t.active?'green':'gray'}`}>{t.active?'Ativo':'Inativo'}</span></div></div><div className="statline"><span>Em curso</span><strong>{t.active_services}</strong></div><div className="statline"><span>Hoje</span><strong>{t.today_services}</strong></div><div className="statline"><span>Semana de trabalho</span><strong>{t.week_services}</strong></div><div className="statline"><span>Em aberto</span><strong>{t.open_services}</strong></div></div>)}{!d.data?.length&&!d.loading&&<div className="panel empty">Ainda não existem técnicos associados ao workspace.</div>}</div></div>
 }
+
+function todayStart(){const d=new Date();d.setHours(0,0,0,0);return d}
+
+function isoWeek(date){const d=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate()));const day=d.getUTCDay()||7;d.setUTCDate(d.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(d.getUTCFullYear(),0,1));return Math.ceil((((d-yearStart)/86400000)+1)/7)}
 
 function Parts({workspace}) {
   const d=useData(async()=>{if(!workspace?.id)return[];const {data,error}=await supabase.from("part_usage_summary").select("*").eq("workspace_id",workspace.id).order("name");if(error)throw error;return data||[]},[workspace?.id]);
@@ -324,12 +341,13 @@ function Parts({workspace}) {
 function Calendar({workspace}) {
   const [weekStart,setWeekStart]=useState(()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);return d});
   const [services,setServices]=useState([]),[techs,setTechs]=useState([]),[availability,setAvailability]=useState([]),[loading,setLoading]=useState(true);
-  const days=useMemo(()=>Array.from({length:7},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d}),[weekStart]);
+  const days=useMemo(()=>Array.from({length:5},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d}),[weekStart]);
   const iso=d=>d.toISOString().slice(0,10);
+  const weekLabel=`Semana ${isoWeek(weekStart)} · ${weekStart.toLocaleDateString("pt-PT",{day:"2-digit",month:"short"})} – ${days[days.length-1]?.toLocaleDateString("pt-PT",{day:"2-digit",month:"short",year:"numeric"})}`;
   async function load(){
     if(!workspace?.id)return;
     setLoading(true);
-    const from=iso(days[0]), to=iso(days[6]);
+    const from=iso(days[0]); const queryEnd=new Date(days[days.length-1]); queryEnd.setDate(queryEnd.getDate()+1); const to=iso(queryEnd);
     const [s,t,a]=await Promise.all([
       supabase.from("service_calendar").select("*").eq("workspace_id",workspace.id).gte("scheduled_start",from+"T00:00:00").lt("scheduled_start",to+"T23:59:59").order("scheduled_start"),
       supabase.from("technicians").select("id,name,active").eq("workspace_id",workspace.id).eq("active",true).order("name"),

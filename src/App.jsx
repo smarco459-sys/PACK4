@@ -80,6 +80,24 @@ function Shell({ session }) {
     load();
   }, [session.user.id, refresh]);
 
+  useEffect(() => {
+    if (!workspace?.id) return;
+    const tables = ["clients", "technicians", "parts", "services", "technician_availability"];
+    const channel = supabase.channel(`workspace-live-${workspace.id}`);
+    tables.forEach((table) => {
+      channel.on("postgres_changes", {
+        event: "*", schema: "public", table,
+        filter: `workspace_id=eq.${workspace.id}`,
+      }, () => setRefresh((value) => value + 1));
+    });
+    channel.on("postgres_changes", {
+      event: "*", schema: "public", table: "workspace_members",
+      filter: `workspace_id=eq.${workspace.id}`,
+    }, () => setRefresh((value) => value + 1));
+    channel.subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [workspace?.id]);
+
   async function logout() {
     await supabase.auth.signOut();
     navigate("/login");
@@ -103,7 +121,7 @@ function Shell({ session }) {
       </div>
     </aside>
     <main className="main">
-      <Routes>
+      <Routes location={undefined} key={refresh}>
         <Route path="/" element={<Dashboard workspace={workspace} refresh={refresh} />} />
         <Route path="/servicos" element={<Services workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
         <Route path="/kanban" element={<Kanban workspace={workspace} setRefresh={setRefresh}/>} />

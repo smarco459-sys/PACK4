@@ -30,7 +30,7 @@ function Login() {
     e.preventDefault();
     setBusy(true); setError(""); setSent(false);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setError(error.message);
+    if (error) setError(/invalid login credentials/i.test(error.message) ? "Email ou password inválidos." : "Não foi possível iniciar sessão. Tente novamente.");
     setBusy(false);
   }
 
@@ -314,7 +314,7 @@ function Calendar({workspace}) {
   }
   useEffect(()=>{load()},[workspace?.id,weekStart.toISOString()]);
   function servicesFor(techId,date){return services.filter(x=>x.technician_id===techId&&x.scheduled_start?.slice(0,10)===iso(date))}
-  function unavailable(techId,date){const a=availability.find(x=>x.technician_id===techId&&x.availability_date===iso(date));return a?.available===false?a:null}
+  function unavailable(techId,date){const a=availability.find(x=>x.technician_id===techId&&x.availability_date===iso(date));return a?.start_time==null&&a?.end_time==null?a:null}
   return <div><Header title="Calendário" subtitle="Planeamento semanal por técnico e disponibilidade" action={<div className="calendar-nav"><button className="ghost" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()-7))}>‹ Semana anterior</button><button className="ghost" onClick={()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);setWeekStart(d)}}>Hoje</button><button className="ghost" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+7))}>Próxima semana ›</button></div>}/>
     <div className="calendar-legend"><span><i className="legend-dot booked"/> Serviço marcado</span><span><i className="legend-dot unavailable"/> Técnico indisponível</span><span><i className="legend-euro">€</i> A faturar</span></div>
     <div className="panel calendar-board">
@@ -326,7 +326,7 @@ function Calendar({workspace}) {
 
 function Reports({workspace}) {
   const d=useData(async()=>{if(!workspace?.id)return[];const {data,error}=await supabase.from("client_service_summary").select("*").eq("workspace_id",workspace.id).order("to_invoice_amount",{ascending:false});if(error)throw error;return data||[]},[workspace?.id]);
-  return <div><Header title="Relatórios" subtitle="Resumo por cliente e faturação"/><div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Total</th><th>Em aberto</th><th>Concluídos</th><th>A faturar</th></tr></thead><tbody>{d.data?.map(x=><tr key={x.client_id}><td><strong>{x.client_name}</strong></td><td>{x.total_services}</td><td>{x.open_services}</td><td>{x.completed_services}</td><td>€ {Number(x.to_invoice_amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</td></tr>)}</tbody></table></div></div></div>
+  return <div><Header title="Relatórios" subtitle="Resumo por cliente e faturação"/><div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Total de serviços</th><th>A faturar</th></tr></thead><tbody>{d.loading?<tr><td colSpan="3"><Loading/></td></tr>:d.error?<tr><td colSpan="3"><ErrorBox e={d.error}/></td></tr>:d.data?.map(x=><tr key={x.client_id}><td><strong>{x.name}</strong></td><td>{x.service_count}</td><td>€ {Number(x.to_invoice_amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</td></tr>)}{!d.loading&&!d.error&&!d.data?.length&&<tr><td colSpan="3" className="empty">Sem dados.</td></tr>}</tbody></table></div></div></div>
 }
 
 function SettingsPage({session,workspace,onRefresh}) {

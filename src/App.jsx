@@ -317,6 +317,15 @@ function Technicians({workspace}) {
     if(!workspace?.id)return[];
     const monday=new Date(); monday.setHours(0,0,0,0); const day=monday.getDay(); monday.setDate(monday.getDate()+(day===0?-6:1-day));
     const friday=new Date(monday); friday.setDate(friday.getDate()+5);
+    const defaultTechnicianNames=["Fabio Silva","Jorge Monteiro","Ruben Gonçalves","Tiago Vieira","Valerii","Orlando","Menassa"];
+    const existingResult=await supabase.from("technicians").select("name").eq("workspace_id",workspace.id);
+    if(existingResult.error)throw existingResult.error;
+    const existingNames=new Set((existingResult.data||[]).map(t=>t.name.trim().toLocaleLowerCase("pt-PT")));
+    const missingNames=defaultTechnicianNames.filter(name=>!existingNames.has(name.toLocaleLowerCase("pt-PT")));
+    if(missingNames.length){
+      const {error}=await supabase.from("technicians").insert(missingNames.map(name=>({workspace_id:workspace.id,name,active:true})));
+      if(error)throw error;
+    }
     const [techResult,serviceResult]=await Promise.all([
       supabase.from("technicians").select("id,name,active,email,phone").eq("workspace_id",workspace.id).order("name"),
       supabase.from("services").select("technician_id,status,scheduled_start,invoiced").eq("workspace_id",workspace.id).gte("scheduled_start",monday.toISOString()).lt("scheduled_start",friday.toISOString())

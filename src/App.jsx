@@ -3,8 +3,10 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
   BarChart3, Settings, LogOut, Plus, Search, RefreshCw, Euro, Clock3,
-  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight
+  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin
 } from "lucide-react";
+import { read, utils, writeFile } from "xlsx";
+import * as pdfjsLib from "pdfjs-dist";
 import { supabase } from "./lib/supabase";
 
 const nav = [
@@ -16,6 +18,8 @@ const nav = [
   ["/tecnicos", "Técnicos", UserRoundCog],
   ["/pecas", "Peças", Package],
   ["/relatorios", "Relatórios", BarChart3],
+  ["/mapa", "Mapa operacional", MapPin],
+  ["/importacao", "Importar dados", Upload],
   ["/definicoes", "Definições", Settings],
 ];
 
@@ -137,6 +141,8 @@ function Shell({ session }) {
         <Route path="/tecnicos" element={<Technicians workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
         <Route path="/pecas" element={<Parts workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
         <Route path="/relatorios" element={<Reports workspace={workspace} refresh={refresh}/>} />
+        <Route path="/mapa" element={<OperationsMap workspace={workspace} refresh={refresh}/>} />
+        <Route path="/importacao" element={<ImportCenter workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
         <Route path="/definicoes" element={<SettingsPage session={session} workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
         <Route path="*" element={<Navigate to="/" replace/>}/>
       </Routes>
@@ -226,6 +232,14 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
     const {data:updated,error}=await supabase.from("services").update({title:data.title,description:data.description,technician_id:data.technician_id||null,status:data.status,priority:data.priority,service_type:data.service_type,machine:data.machine,scheduled_start:data.scheduled_start||null,scheduled_end:data.scheduled_end||null,billable:!!data.billable,amount:data.amount===""?null:Number(data.amount),invoiced:!!data.invoiced,invoice_reference:data.invoice_reference||null,notes:data.notes}).eq("id",data.id).select("*").single();
     setBusy(false); if(error) return alert(error.message); setData(updated); setRefresh?.(x=>x+1); alert("Serviço atualizado.");
   }
+  async function removeService(){
+    if(!window.confirm("Eliminar este serviço? Esta ação não pode ser anulada.")) return;
+    setBusy(true);
+    const {error}=await supabase.from("services").delete().eq("id",service.id);
+    setBusy(false);
+    if(error) return alert(error.message);
+    setRefresh?.(x=>x+1); close();
+  }
   async function addPart(e){
     e.preventDefault(); if(!partId)return;
     const {error}=await supabase.from("service_parts").upsert({service_id:service.id,part_id:partId,quantity:Number(qty),used,notes:null});
@@ -250,7 +264,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <label>Referência fatura<input value={data.invoice_reference||""} onChange={e=>setData({...data,invoice_reference:e.target.value})}/></label>
           <label className="span2">Notas<textarea value={data.notes||""} onChange={e=>setData({...data,notes:e.target.value})}/></label>
         </div>
-        <div className="modal-actions"><button className="ghost" onClick={close}>Fechar</button><button className="primary" disabled={busy} onClick={save}>{busy?"A guardar…":"Guardar alterações"}</button></div>
+        <div className="modal-actions"><button className="danger-btn" type="button" onClick={removeService} disabled={busy}><Trash2 size={15}/> Eliminar serviço</button><span className="modal-actions-spacer"/><button className="ghost" onClick={close}>Fechar</button><button className="primary" disabled={busy} onClick={save}>{busy?"A guardar…":"Guardar alterações"}</button></div>
       </section>
       <aside className="detail-side">
         <div className="detail-box"><h3>Cliente</h3><strong>{client?.name||service.client_name||"—"}</strong><p>{client?.contact_name||""}</p><p>{client?.phone||""}</p><p>{client?.email||""}</p><p>{client?.address||""}{client?.city?`, ${client.city}`:""}</p></div>
@@ -262,6 +276,64 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
       </aside>
     </div>
   </Modal>
+}
+
+function OperationsMap({workspace, refresh}) {
+  const [services, setServices] = useState([]);
+  const [filter, setFilter] = useState("all");
+  const [mapReady, setMapReady] = useState(false);
+  const [error, setError] = useState("");
+  const mapRef = React.useRef(null);
+  const markersRef = React.useRef([]);
+
+  useEffect(() => {
+    async function load() {
+      if (!workspace?.id) return;
+      const [{ data, error: queryError }, { data: clientLocations }] = await Promise.all([
+        supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
+        supabase.from("clients").select("id,latitude,longitude").eq("workspace_id", workspace.id),
+      ]);
+      if (queryError) setError(queryError.message); else {
+        const locations = new Map((clientLocations || []).map(client => [client.id, client]));
+        setServices((data || []).map(service => ({ ...service, ...(locations.get(service.client_id) || {}) })));
+      }
+    }
+    load();
+  }, [workspace?.id, refresh]);
+
+  useEffect(() => {
+    if (window.google?.maps) { setMapReady(true); return; }
+    const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    if (!key) { setError("Configure a VITE_GOOGLE_MAPS_API_KEY para ativar o mapa."); return; }
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry`;
+    script.async = true; script.defer = true; script.onload = () => setMapReady(true); script.onerror = () => setError("Não foi possível carregar o Google Maps.");
+    document.head.appendChild(script);
+    return () => { if (script.parentNode) script.parentNode.removeChild(script); };
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !window.google?.maps) return;
+    const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
+    markersRef.current.forEach(marker => marker.setMap(null));
+    markersRef.current = [];
+    const color = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
+    const visible = services.filter(service => filter === "all" || service.board_status === filter).filter(service => service.latitude && service.longitude);
+    const bounds = new window.google.maps.LatLngBounds();
+    visible.forEach(service => {
+      const marker = new window.google.maps.Marker({ map, position: { lat: Number(service.latitude), lng: Number(service.longitude) }, title: `${service.client_name || "Cliente"} — ${service.title}`, label: { text: "●", color: color[service.board_status] || color.pending, fontSize: "28px" } });
+      const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}</small></div>` });
+      marker.addListener("click", () => info.open({ map, anchor: marker })); markersRef.current.push(marker); bounds.extend(marker.getPosition());
+    });
+    if (visible.length) map.fitBounds(bounds, 70);
+  }, [mapReady, services, filter]);
+
+  const counts = ["pending", "scheduled", "in_progress"].map(status => ({ status, count: services.filter(service => service.board_status === status).length }));
+  return <div><Header title="Mapa operacional" subtitle="Visualize os serviços por localização, estado e prioridade" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendentes</option><option value="scheduled">Agendados</option><option value="in_progress">Em curso</option><option value="completed">Concluídos</option></select>}/>
+    <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status}><i/><span>{status === "pending" ? "Pendentes" : status === "scheduled" ? "Agendados" : "Em curso"}</span><strong>{count}</strong></div>)}</div>
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{services.filter(service => service.latitude && service.longitude).length} localizações disponíveis</span></div><small>Selecione um marcador para ver os detalhes</small></div>{error ? <div className="map-message alert danger">{error}</div> : <div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/>}</section>
+    <p className="map-note">Os serviços só aparecem no mapa quando o cliente tem latitude e longitude. Adicione essas coordenadas nos dados do cliente para ativar a localização.</p>
+  </div>;
 }
 
 function Services({workspace, setRefresh}) {
@@ -297,18 +369,31 @@ function Kanban({workspace,setRefresh}) {
 function Modal({title,close,children}){return <div className="modal-back"><div className="modal"><div className="modal-head"><h2>{title}</h2><button className="icon-btn" onClick={close}><X size={18}/></button></div>{children}</div></div>}
 
 function Clients({workspace,setRefresh}) {
-  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState("");
-  const [form,setForm]=useState({name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""});
+  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState(""),[editing,setEditing]=useState(null),[busy,setBusy]=useState(false);
+  const emptyClient={name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""};
+  const [form,setForm]=useState(emptyClient);
   async function load(){if(!workspace?.id)return; const {data}=await supabase.from("clients").select("*").eq("workspace_id",workspace.id).order("name");setRows(data||[])}
   useEffect(()=>{load()},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const channel=supabase.channel(`clients-live-${workspace.id}`).on("postgres_changes",{event:"*",schema:"public",table:"clients",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(channel)},[workspace?.id]);
-  async function save(e){e.preventDefault();const {error}=await supabase.from("clients").insert({...form,workspace_id:workspace.id});if(error)alert(error.message);else{setOpen(false);setForm({name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""});load();setRefresh?.(x=>x+1)}}
+  async function save(e){
+    e.preventDefault(); setBusy(true);
+    const query=editing ? supabase.from("clients").update(form).eq("id",editing.id) : supabase.from("clients").insert({...form,workspace_id:workspace.id});
+    const {error}=await query; setBusy(false);
+    if(error) return alert(error.message);
+    setOpen(false); setEditing(null); setForm(emptyClient); load(); setRefresh?.(x=>x+1);
+  }
+  async function removeClient(client){
+    if(!window.confirm(`Eliminar o cliente “${client.name}”? Os serviços associados podem ficar sem cliente.`)) return;
+    setBusy(true); const {error}=await supabase.from("clients").delete().eq("id",client.id); setBusy(false);
+    if(error) return alert(error.message); load(); setRefresh?.(x=>x+1);
+  }
+  function editClient(client){setEditing(client);setForm({...emptyClient,...client});setOpen(true)}
   const f=rows.filter(x=>(x.name+" "+(x.city||"")+" "+(x.phone||"")).toLowerCase().includes(q.toLowerCase()));
   function maps(c){const query=[c.address,c.postal_code,c.city].filter(Boolean).join(", ");return query?`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`:null}
   return <div><Header title="Clientes" subtitle="Clientes, contactos, moradas e localização" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo cliente</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente…" value={q} onChange={e=>setQ(e.target.value)}/></div></div>
-    <div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Telefone</th><th>Cidade</th><th>Morada</th><th>Mapa</th></tr></thead><tbody>{f.map(c=><tr key={c.id}><td><strong>{c.name}</strong></td><td>{c.contact_name||"—"}</td><td>{c.phone||"—"}</td><td>{c.city||"—"}</td><td>{c.address||"—"}</td><td>{maps(c)?<a className="table-link" href={maps(c)} target="_blank" rel="noreferrer">Abrir mapa</a>:"—"}</td></tr>)}{!f.length&&<tr><td colSpan="6" className="empty">Sem clientes.</td></tr>}</tbody></table></div></div>
-    {open&&<Modal title="Novo cliente" close={()=>setOpen(false)}><form onSubmit={save} className="form-grid">{["name","contact_name","phone","email","address","postal_code","city"].map(k=><label key={k}>{({name:"Nome",contact_name:"Contacto",phone:"Telefone",email:"Email",address:"Morada",postal_code:"Código postal",city:"Cidade"})[k]}<input required={k==="name"} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}<label className="span2">Notas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary">Criar cliente</button></div></form></Modal>}
+    <div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Telefone</th><th>Cidade</th><th>Morada</th><th>Mapa</th><th aria-label="Ações"></th></tr></thead><tbody>{f.map(c=><tr key={c.id}><td><strong>{c.name}</strong></td><td>{c.contact_name||"—"}</td><td>{c.phone||"—"}</td><td>{c.city||"—"}</td><td>{c.address||"—"}</td><td>{maps(c)?<a className="table-link" href={maps(c)} target="_blank" rel="noreferrer">Abrir mapa</a>:"—"}</td><td><div className="row-actions"><button className="icon-btn small" aria-label={`Editar ${c.name}`} onClick={()=>editClient(c)}><Pencil size={14}/></button><button className="icon-btn small danger-icon" aria-label={`Eliminar ${c.name}`} onClick={()=>removeClient(c)} disabled={busy}><Trash2 size={14}/></button></div></td></tr>)}{!f.length&&<tr><td colSpan="7" className="empty">Sem clientes.</td></tr>}</tbody></table></div></div>
+    {open&&<Modal title={editing?"Editar cliente":"Novo cliente"} close={()=>{setOpen(false);setEditing(null);setForm(emptyClient)}}><form onSubmit={save} className="form-grid client-form"><div className="form-section-heading span2"><span className="form-section-icon"><Users size={16}/></span><div><strong>Dados do cliente</strong><small>Identificação e contactos principais</small></div></div>{["name","contact_name","phone","email","address","postal_code","city"].map(k=><label key={k}>{({name:"Nome completo",contact_name:"Pessoa de contacto",phone:"Telefone",email:"Email",address:"Morada",postal_code:"Código postal",city:"Cidade"})[k]}<input required={k==="name"} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}<label className="span2">Notas internas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":editing?"Guardar alterações":"Criar cliente"}</button></div></form></Modal>}
   </div>
 }
 
@@ -322,10 +407,7 @@ function Technicians({workspace}) {
     if(existingResult.error)throw existingResult.error;
     const existingNames=new Set((existingResult.data||[]).map(t=>t.name.trim().toLocaleLowerCase("pt-PT")));
     const missingNames=defaultTechnicianNames.filter(name=>!existingNames.has(name.toLocaleLowerCase("pt-PT")));
-    if(missingNames.length){
-      const {error}=await supabase.from("technicians").insert(missingNames.map(name=>({workspace_id:workspace.id,name,active:true})));
-      if(error)throw error;
-    }
+    if(missingNames.length){const {error}=await supabase.from("technicians").insert(missingNames.map(name=>({workspace_id:workspace.id,name,active:true})));if(error)throw error;}
     const [techResult,serviceResult]=await Promise.all([
       supabase.from("technicians").select("id,name,active,email,phone").eq("workspace_id",workspace.id).order("name"),
       supabase.from("services").select("technician_id,status,scheduled_start,invoiced").eq("workspace_id",workspace.id).gte("scheduled_start",monday.toISOString()).lt("scheduled_start",friday.toISOString())
@@ -334,8 +416,12 @@ function Technicians({workspace}) {
     const start=todayStart(); const end=new Date(start); end.setDate(end.getDate()+1);
     return (techResult.data||[]).map(t=>{const rows=(serviceResult.data||[]).filter(s=>s.technician_id===t.id);return {...t,technician_id:t.id,open_services:rows.filter(s=>!['completed','cancelled'].includes(s.status)&&!s.invoiced).length,active_services:rows.filter(s=>s.status==='in_progress').length,week_services:rows.length,today_services:rows.filter(s=>s.scheduled_start&&new Date(s.scheduled_start)>=start&&new Date(s.scheduled_start)<end).length};});
   },[workspace?.id]);
+  const [editing,setEditing]=useState(null),[form,setForm]=useState({name:"",email:"",phone:"",active:true}),[busy,setBusy]=useState(false);
+  function startEdit(t){setEditing(t);setForm({name:t.name||"",email:t.email||"",phone:t.phone||"",active:t.active!==false});}
+  async function save(e){e.preventDefault();setBusy(true);const {error}=await supabase.from("technicians").update(form).eq("id",editing.id);setBusy(false);if(error)return alert(error.message);setEditing(null);d.reload();}
+  async function remove(t){if(!window.confirm(`Eliminar o técnico “${t.name}”?`))return;setBusy(true);const {error}=await supabase.from("technicians").delete().eq("id",t.id);setBusy(false);if(error)return alert(error.message);d.reload();}
   useEffect(()=>{if(!workspace?.id)return;const channel=supabase.channel(`technicians-live-${workspace.id}`).on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},d.reload).on("postgres_changes",{event:"*",schema:"public",table:"technicians",filter:`workspace_id=eq.${workspace.id}`},d.reload).subscribe();return()=>supabase.removeChannel(channel)},[workspace?.id]);
-  return <div><Header title="Técnicos" subtitle="Carga semanal, disponibilidade e serviços em aberto"/><div className="cards-grid">{d.data?.map(t=><div className="panel tech-card" key={t.technician_id}><div className="tech-title"><div className="avatar big">{t.name.slice(0,1)}</div><div><h2>{t.name}</h2><span className={`status ${t.active?'green':'gray'}`}>{t.active?'Ativo':'Inativo'}</span></div></div><div className="statline"><span>Em curso</span><strong>{t.active_services}</strong></div><div className="statline"><span>Hoje</span><strong>{t.today_services}</strong></div><div className="statline"><span>Semana de trabalho</span><strong>{t.week_services}</strong></div><div className="statline"><span>Em aberto</span><strong>{t.open_services}</strong></div></div>)}{!d.data?.length&&!d.loading&&<div className="panel empty">Ainda não existem técnicos associados ao workspace.</div>}</div></div>
+  return <div><Header title="Técnicos" subtitle="Carga semanal, disponibilidade e serviços em aberto"/><div className="cards-grid">{d.data?.map(t=><div className="panel tech-card" key={t.technician_id}><div className="tech-title"><div className="avatar big">{t.name.slice(0,1)}</div><div><h2>{t.name}</h2><span className={`status ${t.active?'green':'gray'}`}>{t.active?'Ativo':'Inativo'}</span></div><div className="row-actions"><button className="icon-btn" title="Editar técnico" onClick={()=>startEdit(t)}><Pencil size={15}/></button><button className="icon-btn danger-icon" title="Eliminar técnico" onClick={()=>remove(t)}><Trash2 size={15}/></button></div></div><div className="statline"><span>Em curso</span><strong>{t.active_services}</strong></div><div className="statline"><span>Hoje</span><strong>{t.today_services}</strong></div><div className="statline"><span>Semana de trabalho</span><strong>{t.week_services}</strong></div><div className="statline"><span>Em aberto</span><strong>{t.open_services}</strong></div></div>)}{!d.data?.length&&!d.loading&&<div className="panel empty">Ainda não existem técnicos associados ao workspace.</div>}</div>{editing&&<Modal title="Editar técnico" close={()=>setEditing(null)}><form onSubmit={save} className="form-grid"><label>Nome<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Email<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Telefone<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label><label>Estado<select value={form.active?"true":"false"} onChange={e=>setForm({...form,active:e.target.value==="true"})}><option value="true">Ativo</option><option value="false">Inativo</option></select></label><div className="modal-actions"><button type="button" className="secondary" onClick={()=>setEditing(null)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":"Guardar alterações"}</button></div></form></Modal>}</div>
 }
 
 function todayStart(){const d=new Date();d.setHours(0,0,0,0);return d}
@@ -381,6 +467,20 @@ function Reports({workspace}) {
   const d=useData(async()=>{if(!workspace?.id)return[];const {data,error}=await supabase.from("client_service_summary").select("*").eq("workspace_id",workspace.id).order("to_invoice_amount",{ascending:false});if(error)throw error;return data||[]},[workspace?.id]);
   return <div><Header title="Relatórios" subtitle="Resumo por cliente e faturação"/><div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Total de serviços</th><th>A faturar</th></tr></thead><tbody>{d.loading?<tr><td colSpan="3"><Loading/></td></tr>:d.error?<tr><td colSpan="3"><ErrorBox e={d.error}/></td></tr>:d.data?.map(x=><tr key={x.client_id}><td><strong>{x.name}</strong></td><td>{x.service_count}</td><td>€ {Number(x.to_invoice_amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</td></tr>)}{!d.loading&&!d.error&&!d.data?.length&&<tr><td colSpan="3" className="empty">Sem dados.</td></tr>}</tbody></table></div></div></div>
 }
+
+function ImportCenter({workspace,onRefresh}) {
+  const [file,setFile]=useState(null),[kind,setKind]=useState("clients"),[rows,setRows]=useState([]),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+  const aliases={name:["name","nome","cliente","client","empresa"],contact_name:["contact_name","contacto","contato","responsável","responsavel"],phone:["phone","telefone","telemóvel","telemovel","tel"],email:["email","e-mail","mail"],address:["address","morada","endereço","endereco"],postal_code:["postal_code","código postal","codigo postal","cp"],city:["city","cidade"],title:["title","título","titulo","serviço","servico","descrição","descricao"],description:["description","descrição","descricao","detalhes"],status:["status","estado"],priority:["priority","prioridade"],service_type:["service_type","tipo","tipo de serviço","tipo de servico"],machine:["machine","máquina","maquina","equipamento"],amount:["amount","valor","preço","preco","total"]};
+  const normalize=(value)=>String(value??"").trim().toLocaleLowerCase("pt-PT").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"");
+  function mapRow(row){const out={};Object.entries(aliases).forEach(([key,names])=>{const found=Object.keys(row).find(k=>names.some(n=>normalize(k)===normalize(n)||normalize(k).includes(normalize(n))));if(found)out[key]=row[found]});return out}
+  async function readPdf(blob){const pdf=await pdfjsLib.getDocument({data:await blob.arrayBuffer()}).promise;let text="";for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i);const content=await page.getTextContent();text+=content.items.map(x=>x.str).join(" ")+"\\n"}return text.split(/\\n|(?=\\b(?:cliente|nome)\\s*[:;-])/i).map(line=>{const email=line.match(/[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}/)?.[0]||"";const phone=line.match(/(?:\\+351\\s*)?9\\d{2}[\\s-]?\\d{3}[\\s-]?\\d{3}/)?.[0]||"";return {name:line.replace(email,"").replace(phone,"").replace(/^(cliente|nome)\\s*[:;-]?/i,"").trim(),email,phone}}).filter(x=>x.name||x.email||x.phone)}
+  async function parse(blob){setMessage("");const ext=blob.name.split(".").pop().toLowerCase();if(ext==="pdf")return readPdf(blob);const workbook=read(await blob.arrayBuffer(),{type:"array",cellDates:true});const all=[];workbook.SheetNames.forEach(sheet=>utils.sheet_to_json(workbook.Sheets[sheet],{defval:""}).forEach(row=>all.push(mapRow(row))));return all.filter(row=>Object.values(row).some(Boolean))}
+  async function onFile(e){const selected=e.target.files?.[0];if(!selected)return;setFile(selected);try{const parsed=await parse(selected);setRows(parsed);setMessage(`${parsed.length} registos reconhecidos em ${selected.name}.`)}catch(error){setRows([]);setMessage(`Não foi possível ler o ficheiro: ${error.message}`)}}
+  async function importRows(){if(!workspace?.id||!rows.length)return;setBusy(true);const user=(await supabase.auth.getUser()).data.user?.id;const cleaned=rows.map(r=>kind==="clients"?{name:r.name||r.client||"Cliente importado",contact_name:r.contact_name||null,phone:r.phone||null,email:r.email||null,address:r.address||null,postal_code:r.postal_code||null,city:r.city||null,notes:r.notes||null,workspace_id:workspace.id}:{title:r.title||"Serviço importado",description:r.description||null,status:["pending","scheduled","in_progress","completed","cancelled"].includes(normalize(r.status).replace(" ","_"))?normalize(r.status).replace(" ","_"):"pending",priority:["low","normal","high","urgent"].includes(normalize(r.priority))?normalize(r.priority):"normal",service_type:r.service_type||null,machine:r.machine||null,amount:r.amount?Number(String(r.amount).replace(",",".")):null,workspace_id:workspace.id,created_by:user,client_id:null});const {error}=await supabase.from(kind).insert(cleaned);setBusy(false);if(error)return setMessage(`Importação interrompida: ${error.message}`);setMessage(`${cleaned.length} ${kind==="clients"?"clientes":"serviços"} importados com sucesso.`);setRows([]);setFile(null);onRefresh?.(x=>x+1)}
+  function downloadTemplate(){const sample=kind==="clients"?[{Nome:"Empresa Exemplo",Contacto:"João Silva",Telefone:"912 345 678",Email:"geral@empresa.pt",Morada:"Rua Central 1",Cidade:"Porto","Código postal":"4000-000"}]:[{Título:"Manutenção preventiva",Estado:"pending",Prioridade:"normal",Tipo:"Manutenção",Equipamento:"Máquina 1",Valor:"120"}];const sheet=utils.json_to_sheet(sample);const book=utils.book_new();utils.book_append_sheet(book,sheet,"Importação");writeFile(book,`modelo-${kind}.xlsx`)}
+  return <div><Header title="Importar dados" subtitle="Traga informação de clientes e serviços para o PACK4 com validação e pré-visualização"/><div className="import-layout"><section className="panel import-card"><div className="import-icon"><Upload size={22}/></div><h2>Importar ficheiro</h2><p className="muted">Aceitamos Excel (.xlsx, .xls) e PDF. Os dados são lidos localmente antes de serem enviados.</p><label className="file-drop"><input type="file" accept=".xlsx,.xls,.pdf" onChange={onFile}/><FileSpreadsheet size={24}/><strong>{file?file.name:"Escolher ficheiro"}</strong><span>Clique para selecionar ou arraste para aqui</span></label><div className="import-options"><label>Tipo de dados<select value={kind} onChange={e=>setKind(e.target.value)}><option value="clients">Clientes</option><option value="services">Serviços</option></select></label><button className="ghost" onClick={downloadTemplate}><Download size={16}/> Descarregar modelo</button></div>{message&&<div className={`alert ${message.includes("sucesso")?"success":"info"}`}>{message}</div>}</section><section className="panel import-preview"><div className="panel-head"><div><h2>Pré-visualização</h2><p className="muted">Confirme os dados antes de importar.</p></div><span className="status blue">{rows.length} linhas</span></div>{rows.length?<><div className="import-table"><table><thead><tr>{Object.keys(rows[0]).slice(0,6).map(k=><th key={k}>{k}</th>)}</tr></thead><tbody>{rows.slice(0,8).map((row,i)=><tr key={i}>{Object.keys(rows[0]).slice(0,6).map(k=><td key={k}>{String(row[k]||"—")}</td>)}</tr>)}</tbody></table></div><button className="primary wide" onClick={importRows} disabled={busy}>{busy?"A importar…":`Importar ${rows.length} ${kind==="clients"?"clientes":"serviços"}`}</button></>:<div className="import-empty"><FileText size={28}/><strong>A pré-visualização aparecerá aqui</strong><span>Use um modelo ou carregue um ficheiro existente.</span></div>}</section></div></div>
+}
+
 
 function SettingsPage({session,workspace,onRefresh}) {
   return <div><Header title="Definições" subtitle="Conta, workspace e integrações"/><div className="grid-2"><div className="panel"><h2>Conta</h2><div className="setting"><span>Email</span><strong>{session.user.email}</strong></div><div className="setting"><span>Workspace</span><strong>{workspace?.name||"Sem workspace atribuído"}</strong></div><div className="setting"><span>Permissão</span><strong>{workspace?.role||"—"}</strong></div></div><div className="panel"><h2>Integrações</h2><div className="integration"><b>Google Sheets</b><span>Preparado para sincronização de leitura, sem alterar a folha original.</span></div><div className="integration"><b>Google Maps</b><span>Preparado para clientes com coordenadas.</span></div><div className="integration"><b>PHC</b><span>Integração futura.</span></div><div className="integration"><b>Supabase Auth</b><span className="status green">Ligado</span></div></div></div></div>

@@ -3,7 +3,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
   BarChart3, Settings, LogOut, Plus, Search, RefreshCw, Euro, Clock3,
-  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight
+  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
@@ -226,6 +226,14 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
     const {data:updated,error}=await supabase.from("services").update({title:data.title,description:data.description,technician_id:data.technician_id||null,status:data.status,priority:data.priority,service_type:data.service_type,machine:data.machine,scheduled_start:data.scheduled_start||null,scheduled_end:data.scheduled_end||null,billable:!!data.billable,amount:data.amount===""?null:Number(data.amount),invoiced:!!data.invoiced,invoice_reference:data.invoice_reference||null,notes:data.notes}).eq("id",data.id).select("*").single();
     setBusy(false); if(error) return alert(error.message); setData(updated); setRefresh?.(x=>x+1); alert("Serviço atualizado.");
   }
+  async function removeService(){
+    if(!window.confirm("Eliminar este serviço? Esta ação não pode ser anulada.")) return;
+    setBusy(true);
+    const {error}=await supabase.from("services").delete().eq("id",service.id);
+    setBusy(false);
+    if(error) return alert(error.message);
+    setRefresh?.(x=>x+1); close();
+  }
   async function addPart(e){
     e.preventDefault(); if(!partId)return;
     const {error}=await supabase.from("service_parts").upsert({service_id:service.id,part_id:partId,quantity:Number(qty),used,notes:null});
@@ -250,7 +258,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <label>Referência fatura<input value={data.invoice_reference||""} onChange={e=>setData({...data,invoice_reference:e.target.value})}/></label>
           <label className="span2">Notas<textarea value={data.notes||""} onChange={e=>setData({...data,notes:e.target.value})}/></label>
         </div>
-        <div className="modal-actions"><button className="ghost" onClick={close}>Fechar</button><button className="primary" disabled={busy} onClick={save}>{busy?"A guardar…":"Guardar alterações"}</button></div>
+        <div className="modal-actions"><button className="danger-btn" type="button" onClick={removeService} disabled={busy}><Trash2 size={15}/> Eliminar serviço</button><span className="modal-actions-spacer"/><button className="ghost" onClick={close}>Fechar</button><button className="primary" disabled={busy} onClick={save}>{busy?"A guardar…":"Guardar alterações"}</button></div>
       </section>
       <aside className="detail-side">
         <div className="detail-box"><h3>Cliente</h3><strong>{client?.name||service.client_name||"—"}</strong><p>{client?.contact_name||""}</p><p>{client?.phone||""}</p><p>{client?.email||""}</p><p>{client?.address||""}{client?.city?`, ${client.city}`:""}</p></div>
@@ -297,18 +305,31 @@ function Kanban({workspace,setRefresh}) {
 function Modal({title,close,children}){return <div className="modal-back"><div className="modal"><div className="modal-head"><h2>{title}</h2><button className="icon-btn" onClick={close}><X size={18}/></button></div>{children}</div></div>}
 
 function Clients({workspace,setRefresh}) {
-  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState("");
-  const [form,setForm]=useState({name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""});
+  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState(""),[editing,setEditing]=useState(null),[busy,setBusy]=useState(false);
+  const emptyClient={name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""};
+  const [form,setForm]=useState(emptyClient);
   async function load(){if(!workspace?.id)return; const {data}=await supabase.from("clients").select("*").eq("workspace_id",workspace.id).order("name");setRows(data||[])}
   useEffect(()=>{load()},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const channel=supabase.channel(`clients-live-${workspace.id}`).on("postgres_changes",{event:"*",schema:"public",table:"clients",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(channel)},[workspace?.id]);
-  async function save(e){e.preventDefault();const {error}=await supabase.from("clients").insert({...form,workspace_id:workspace.id});if(error)alert(error.message);else{setOpen(false);setForm({name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""});load();setRefresh?.(x=>x+1)}}
+  async function save(e){
+    e.preventDefault(); setBusy(true);
+    const query=editing ? supabase.from("clients").update(form).eq("id",editing.id) : supabase.from("clients").insert({...form,workspace_id:workspace.id});
+    const {error}=await query; setBusy(false);
+    if(error) return alert(error.message);
+    setOpen(false); setEditing(null); setForm(emptyClient); load(); setRefresh?.(x=>x+1);
+  }
+  async function removeClient(client){
+    if(!window.confirm(`Eliminar o cliente “${client.name}”? Os serviços associados podem ficar sem cliente.`)) return;
+    setBusy(true); const {error}=await supabase.from("clients").delete().eq("id",client.id); setBusy(false);
+    if(error) return alert(error.message); load(); setRefresh?.(x=>x+1);
+  }
+  function editClient(client){setEditing(client);setForm({...emptyClient,...client});setOpen(true)}
   const f=rows.filter(x=>(x.name+" "+(x.city||"")+" "+(x.phone||"")).toLowerCase().includes(q.toLowerCase()));
   function maps(c){const query=[c.address,c.postal_code,c.city].filter(Boolean).join(", ");return query?`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`:null}
   return <div><Header title="Clientes" subtitle="Clientes, contactos, moradas e localização" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo cliente</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente…" value={q} onChange={e=>setQ(e.target.value)}/></div></div>
-    <div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Telefone</th><th>Cidade</th><th>Morada</th><th>Mapa</th></tr></thead><tbody>{f.map(c=><tr key={c.id}><td><strong>{c.name}</strong></td><td>{c.contact_name||"—"}</td><td>{c.phone||"—"}</td><td>{c.city||"—"}</td><td>{c.address||"—"}</td><td>{maps(c)?<a className="table-link" href={maps(c)} target="_blank" rel="noreferrer">Abrir mapa</a>:"—"}</td></tr>)}{!f.length&&<tr><td colSpan="6" className="empty">Sem clientes.</td></tr>}</tbody></table></div></div>
-    {open&&<Modal title="Novo cliente" close={()=>setOpen(false)}><form onSubmit={save} className="form-grid">{["name","contact_name","phone","email","address","postal_code","city"].map(k=><label key={k}>{({name:"Nome",contact_name:"Contacto",phone:"Telefone",email:"Email",address:"Morada",postal_code:"Código postal",city:"Cidade"})[k]}<input required={k==="name"} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}<label className="span2">Notas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary">Criar cliente</button></div></form></Modal>}
+    <div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Telefone</th><th>Cidade</th><th>Morada</th><th>Mapa</th><th aria-label="Ações"></th></tr></thead><tbody>{f.map(c=><tr key={c.id}><td><strong>{c.name}</strong></td><td>{c.contact_name||"—"}</td><td>{c.phone||"—"}</td><td>{c.city||"—"}</td><td>{c.address||"—"}</td><td>{maps(c)?<a className="table-link" href={maps(c)} target="_blank" rel="noreferrer">Abrir mapa</a>:"—"}</td><td><div className="row-actions"><button className="icon-btn small" aria-label={`Editar ${c.name}`} onClick={()=>editClient(c)}><Pencil size={14}/></button><button className="icon-btn small danger-icon" aria-label={`Eliminar ${c.name}`} onClick={()=>removeClient(c)} disabled={busy}><Trash2 size={14}/></button></div></td></tr>)}{!f.length&&<tr><td colSpan="7" className="empty">Sem clientes.</td></tr>}</tbody></table></div></div>
+    {open&&<Modal title={editing?"Editar cliente":"Novo cliente"} close={()=>{setOpen(false);setEditing(null);setForm(emptyClient)}}><form onSubmit={save} className="form-grid">{["name","contact_name","phone","email","address","postal_code","city"].map(k=><label key={k}>{({name:"Nome",contact_name:"Contacto",phone:"Telefone",email:"Email",address:"Morada",postal_code:"Código postal",city:"Cidade"})[k]}<input required={k==="name"} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}<label className="span2">Notas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":editing?"Guardar alterações":"Criar cliente"}</button></div></form></Modal>}
   </div>
 }
 

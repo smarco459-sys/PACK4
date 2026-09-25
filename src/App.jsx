@@ -3,7 +3,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
   BarChart3, Settings, LogOut, Plus, Search, RefreshCw, Euro, Clock3,
-  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download
+  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin
 } from "lucide-react";
 import { read, utils, writeFile } from "xlsx";
 import * as pdfjsLib from "pdfjs-dist";
@@ -18,6 +18,7 @@ const nav = [
   ["/tecnicos", "Técnicos", UserRoundCog],
   ["/pecas", "Peças", Package],
   ["/relatorios", "Relatórios", BarChart3],
+  ["/mapa", "Mapa operacional", MapPin],
   ["/importacao", "Importar dados", Upload],
   ["/definicoes", "Definições", Settings],
 ];
@@ -140,6 +141,7 @@ function Shell({ session }) {
         <Route path="/tecnicos" element={<Technicians workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
         <Route path="/pecas" element={<Parts workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
         <Route path="/relatorios" element={<Reports workspace={workspace} refresh={refresh}/>} />
+        <Route path="/mapa" element={<OperationsMap workspace={workspace} refresh={refresh}/>} />
         <Route path="/importacao" element={<ImportCenter workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
         <Route path="/definicoes" element={<SettingsPage session={session} workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
         <Route path="*" element={<Navigate to="/" replace/>}/>
@@ -274,6 +276,64 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
       </aside>
     </div>
   </Modal>
+}
+
+function OperationsMap({workspace, refresh}) {
+  const [services, setServices] = useState([]);
+  const [filter, setFilter] = useState("all");
+  const [mapReady, setMapReady] = useState(false);
+  const [error, setError] = useState("");
+  const mapRef = React.useRef(null);
+  const markersRef = React.useRef([]);
+
+  useEffect(() => {
+    async function load() {
+      if (!workspace?.id) return;
+      const [{ data, error: queryError }, { data: clientLocations }] = await Promise.all([
+        supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
+        supabase.from("clients").select("id,latitude,longitude").eq("workspace_id", workspace.id),
+      ]);
+      if (queryError) setError(queryError.message); else {
+        const locations = new Map((clientLocations || []).map(client => [client.id, client]));
+        setServices((data || []).map(service => ({ ...service, ...(locations.get(service.client_id) || {}) })));
+      }
+    }
+    load();
+  }, [workspace?.id, refresh]);
+
+  useEffect(() => {
+    if (window.google?.maps) { setMapReady(true); return; }
+    const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    if (!key) { setError("Configure a VITE_GOOGLE_MAPS_API_KEY para ativar o mapa."); return; }
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry`;
+    script.async = true; script.defer = true; script.onload = () => setMapReady(true); script.onerror = () => setError("Não foi possível carregar o Google Maps.");
+    document.head.appendChild(script);
+    return () => { if (script.parentNode) script.parentNode.removeChild(script); };
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !window.google?.maps) return;
+    const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
+    markersRef.current.forEach(marker => marker.setMap(null));
+    markersRef.current = [];
+    const color = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
+    const visible = services.filter(service => filter === "all" || service.board_status === filter).filter(service => service.latitude && service.longitude);
+    const bounds = new window.google.maps.LatLngBounds();
+    visible.forEach(service => {
+      const marker = new window.google.maps.Marker({ map, position: { lat: Number(service.latitude), lng: Number(service.longitude) }, title: `${service.client_name || "Cliente"} — ${service.title}`, label: { text: "●", color: color[service.board_status] || color.pending, fontSize: "28px" } });
+      const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}</small></div>` });
+      marker.addListener("click", () => info.open({ map, anchor: marker })); markersRef.current.push(marker); bounds.extend(marker.getPosition());
+    });
+    if (visible.length) map.fitBounds(bounds, 70);
+  }, [mapReady, services, filter]);
+
+  const counts = ["pending", "scheduled", "in_progress"].map(status => ({ status, count: services.filter(service => service.board_status === status).length }));
+  return <div><Header title="Mapa operacional" subtitle="Visualize os serviços por localização, estado e prioridade" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendentes</option><option value="scheduled">Agendados</option><option value="in_progress">Em curso</option><option value="completed">Concluídos</option></select>}/>
+    <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status}><i/><span>{status === "pending" ? "Pendentes" : status === "scheduled" ? "Agendados" : "Em curso"}</span><strong>{count}</strong></div>)}</div>
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{services.filter(service => service.latitude && service.longitude).length} localizações disponíveis</span></div><small>Selecione um marcador para ver os detalhes</small></div>{error ? <div className="map-message alert danger">{error}</div> : <div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/>}</section>
+    <p className="map-note">Os serviços só aparecem no mapa quando o cliente tem latitude e longitude. Adicione essas coordenadas nos dados do cliente para ativar a localização.</p>
+  </div>;
 }
 
 function Services({workspace, setRefresh}) {

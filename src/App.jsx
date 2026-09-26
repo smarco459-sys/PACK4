@@ -227,7 +227,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
   useEffect(()=>{load()},[service?.id]);
   async function save(){
     setBusy(true);
-    const {data:updated,error}=await supabase.from("services").update({title:data.title,description:data.description,technician_id:data.technician_id||null,status:data.status,priority:data.priority,service_type:data.service_type,machine:data.machine,scheduled_start:data.scheduled_start||null,scheduled_end:data.scheduled_end||null,billable:!!data.billable,amount:data.amount===""?null:Number(data.amount),invoiced:!!data.invoiced,invoice_reference:data.invoice_reference||null,notes:data.notes}).eq("id",data.id).select("*").single();
+    const {data:updated,error}=await supabase.from("services").update({title:data.title,description:data.description,technician_id:data.technician_id||null,status:data.status,priority:data.priority,service_type:data.service_type,machine:data.machine,scheduled_start:localDateTimeToIso(data.scheduled_start),scheduled_end:localDateTimeToIso(data.scheduled_end),billable:!!data.billable,amount:data.amount===""?null:Number(data.amount),invoiced:!!data.invoiced,invoice_reference:data.invoice_reference||null,notes:data.notes}).eq("id",data.id).select("*").single();
     setBusy(false); if(error) return alert(error.message); setData(updated); setRefresh?.(x=>x+1); alert("Serviço atualizado.");
   }
   async function removeService(){
@@ -253,8 +253,8 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <label>Estado<select value={data.status||"pending"} onChange={e=>setData({...data,status:e.target.value,invoiced:e.target.value==="completed"?data.invoiced:false})}><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="cancelled">Cancelado</option></select></label>
           <label>Tipo<input value={data.service_type||""} onChange={e=>setData({...data,service_type:e.target.value})}/></label>
           <label>Máquina/equipamento<input value={data.machine||""} onChange={e=>setData({...data,machine:e.target.value})}/></label>
-          <label>Início<input type="datetime-local" value={data.scheduled_start?String(data.scheduled_start).slice(0,16):""} onChange={e=>setData({...data,scheduled_start:e.target.value})}/></label>
-          <label>Fim<input type="datetime-local" value={data.scheduled_end?String(data.scheduled_end).slice(0,16):""} onChange={e=>setData({...data,scheduled_end:e.target.value})}/></label>
+          <label>Início<input type="datetime-local" value={isoToLocalInput(data.scheduled_start)} onChange={e=>setData({...data,scheduled_start:e.target.value})}/></label>
+          <label>Fim<input type="datetime-local" value={isoToLocalInput(data.scheduled_end)} onChange={e=>setData({...data,scheduled_end:e.target.value})}/></label>
           <label className="span2">Descrição<textarea value={data.description||""} onChange={e=>setData({...data,description:e.target.value})}/></label>
           <label className="check"><input type="checkbox" checked={!!data.billable} onChange={e=>setData({...data,billable:e.target.checked})}/> A faturar</label>
           <label>Valor<input type="number" step="0.01" value={data.amount??""} onChange={e=>setData({...data,amount:e.target.value})}/></label>
@@ -366,7 +366,7 @@ function Services({workspace, setRefresh}) {
   useEffect(()=>{load()},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel("services-live-list").on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
   const filtered=rows.filter(r=>(status==="all"||r.board_status===status)&&((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase().includes(q.toLowerCase()));
-  async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:form.amount?Number(form.amount):null,scheduled_start:form.scheduled_start||null,scheduled_end:form.scheduled_end||null,status:form.scheduled_start&&form.status==="pending"?"scheduled":form.status};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
+  async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:form.amount?Number(form.amount):null,scheduled_start:localDateTimeToIso(form.scheduled_start),scheduled_end:localDateTimeToIso(form.scheduled_end),status:form.scheduled_start&&form.status==="pending"?"scheduled":form.status};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
   async function move(id,newStatus){const {error}=await supabase.from("services").update({status:newStatus,invoiced:newStatus==="completed"?false:false}).eq("id",id);if(error)alert(error.message);else{load();setRefresh?.(x=>x+1)}}
   return <div><Header title="Serviços" subtitle="Gestão operacional e acompanhamento das intervenções" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo serviço</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente, serviço ou técnico…" value={q} onChange={e=>setQ(e.target.value)}/></div><select value={status} onChange={e=>setStatus(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="invoiced">Faturado</option></select></div>
@@ -447,6 +447,28 @@ function Technicians({workspace}) {
 
 function todayStart(){const d=new Date();d.setHours(0,0,0,0);return d}
 
+function localDateKey(value){
+  if(!value)return "";
+  const text=String(value);
+  if(!/[zZ]|[+-]\d{2}:?\d{2}$/.test(text))return text.slice(0,10);
+  const date=new Date(value);
+  return Number.isNaN(date.getTime())?text.slice(0,10):`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+
+function localDateTimeToIso(value){
+  if(!value)return null;
+  const date=new Date(value);
+  return Number.isNaN(date.getTime())?null:date.toISOString();
+}
+
+function isoToLocalInput(value){
+  if(!value)return "";
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime()))return String(value).slice(0,16);
+  const pad=number=>String(number).padStart(2,"0");
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function isoWeek(date){const d=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate()));const day=d.getUTCDay()||7;d.setUTCDate(d.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(d.getUTCFullYear(),0,1));return Math.ceil((((d-yearStart)/86400000)+1)/7)}
 
 function Parts({workspace}) {
@@ -458,14 +480,14 @@ function Calendar({workspace,refresh}) {
   const [weekStart,setWeekStart]=useState(()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);return d});
   const [services,setServices]=useState([]),[techs,setTechs]=useState([]),[availability,setAvailability]=useState([]),[loading,setLoading]=useState(true);
   const days=useMemo(()=>Array.from({length:5},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d}),[weekStart]);
-  const iso=d=>d.toISOString().slice(0,10);
+  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const weekLabel=`Semana ${isoWeek(weekStart)} · ${weekStart.toLocaleDateString("pt-PT",{day:"2-digit",month:"short"})} – ${days[days.length-1]?.toLocaleDateString("pt-PT",{day:"2-digit",month:"short",year:"numeric"})}`;
   async function load(){
     if(!workspace?.id)return;
     setLoading(true);
     const from=iso(days[0]); const queryEnd=new Date(days[days.length-1]); queryEnd.setDate(queryEnd.getDate()+1); const to=iso(queryEnd);
     const [s,t,a,c]=await Promise.all([
-      supabase.from("services").select("*").eq("workspace_id",workspace.id).not("scheduled_start","is",null).gte("scheduled_start",from+"T00:00:00").lt("scheduled_start",to+"T00:00:00").order("scheduled_start"),
+      supabase.from("services").select("*").eq("workspace_id",workspace.id).not("scheduled_start","is",null).order("scheduled_start"),
       supabase.from("technicians").select("id,name,active").eq("workspace_id",workspace.id).eq("active",true).order("name"),
       supabase.from("technician_availability").select("*").eq("workspace_id",workspace.id).gte("availability_date",from).lt("availability_date",to),
       supabase.from("clients").select("id,name").eq("workspace_id",workspace.id)
@@ -473,11 +495,12 @@ function Calendar({workspace,refresh}) {
     if (s.error || t.error || a.error || c.error) throw s.error || t.error || a.error || c.error;
     const technicianNames=new Map((t.data||[]).map(tech=>[String(tech.id),tech.name]));
     const clientNames=new Map((c.data||[]).map(client=>[String(client.id),client.name]));
-    setServices((s.data||[]).map(service=>({...service,client_name:service.client_name||clientNames.get(String(service.client_id))||"Cliente",technician_name:service.technician_name||technicianNames.get(String(service.technician_id))||"Por atribuir"})));
+    const weekServices=(s.data||[]).filter(service=>localDateKey(service.scheduled_start)>=from&&localDateKey(service.scheduled_start)<to);
+    setServices(weekServices.map(service=>({...service,client_name:service.client_name||clientNames.get(String(service.client_id))||"Cliente",technician_name:service.technician_name||technicianNames.get(String(service.technician_id))||"Por atribuir"})));
     setTechs(t.data||[]);setAvailability(a.data||[]);setLoading(false);
   }
   useEffect(()=>{load()},[workspace?.id,weekStart.toISOString(),refresh]);
-  function servicesFor(techId,date){return services.filter(x=>String(x.technician_id)===String(techId)&&x.scheduled_start?.slice(0,10)===iso(date))}
+  function servicesFor(techId,date){return services.filter(x=>String(x.technician_id)===String(techId)&&localDateKey(x.scheduled_start)===iso(date))}
   function unavailable(techId,date){const a=availability.find(x=>String(x.technician_id)===String(techId)&&String(x.availability_date).slice(0,10)===iso(date));return a?.start_time==null&&a?.end_time==null?a:null}
   return <div><Header title="Calendário" subtitle="Planeamento semanal por técnico e disponibilidade" action={<div className="calendar-nav"><button className="ghost" aria-label="Semana anterior" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()-7))}>‹ <span>Anterior</span></button><button className="today-btn" onClick={()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);setWeekStart(d)}}>Hoje</button><button className="ghost" aria-label="Próxima semana" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+7))}><span>Próxima</span> ›</button></div>}/> 
     <div className="calendar-toolbar"><div><span className="eyebrow">Planeamento</span><strong>{weekLabel}</strong></div><span className="calendar-count">{services.length} {services.length===1?"serviço agendado":"serviços agendados"}</span></div>

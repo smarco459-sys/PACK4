@@ -5,9 +5,14 @@ import {
   BarChart3, Settings, LogOut, Plus, Search, RefreshCw, Euro, Clock3,
   CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin
 } from "lucide-react";
-import { read, utils, writeFile } from "xlsx";
-import * as pdfjsLib from "pdfjs-dist";
 import { supabase } from "./lib/supabase";
+
+const HOURLY_RATE = 75;
+const DISTANCE_RATE = 0.75;
+const SERVICE_BASES = [
+  { name: "PACK4 Soluções para indústria", lat: 38.9722, lng: -9.2305 },
+  { name: "Mafra", lat: 38.9369, lng: -9.3276 },
+];
 
 const nav = [
   ["/", "Dashboard", LayoutDashboard],
@@ -229,7 +234,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
   useEffect(()=>{load()},[service?.id]);
   async function save(){
     setBusy(true);
-    const {data:updated,error}=await supabase.from("services").update({title:data.title,description:data.description,technician_id:data.technician_id||null,status:data.status,priority:data.priority,service_type:data.service_type,machine:data.machine,scheduled_start:data.scheduled_start||null,scheduled_end:data.scheduled_end||null,billable:!!data.billable,amount:data.amount===""?null:Number(data.amount),invoiced:!!data.invoiced,invoice_reference:data.invoice_reference||null,notes:data.notes}).eq("id",data.id).select("*").single();
+    const {data:updated,error}=await supabase.from("services").update({title:data.title,description:data.description,technician_id:data.technician_id||null,status:data.status,priority:data.priority,service_type:data.service_type,machine:data.machine,scheduled_start:localDateTimeToIso(data.scheduled_start),scheduled_end:localDateTimeToIso(data.scheduled_end),billable:!!data.billable,amount:data.amount===""?null:Number(data.amount),invoiced:!!data.invoiced,invoice_reference:data.invoice_reference||null,notes:data.notes}).eq("id",data.id).select("*").single();
     setBusy(false); if(error) return alert(error.message); setData(updated); setRefresh?.(x=>x+1); alert("Serviço atualizado.");
   }
   async function removeService(){
@@ -255,8 +260,8 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <label>Estado<select value={data.status||"pending"} onChange={e=>setData({...data,status:e.target.value,invoiced:e.target.value==="completed"?data.invoiced:false})}><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="cancelled">Cancelado</option></select></label>
           <label>Tipo<input value={data.service_type||""} onChange={e=>setData({...data,service_type:e.target.value})}/></label>
           <label>Máquina/equipamento<input value={data.machine||""} onChange={e=>setData({...data,machine:e.target.value})}/></label>
-          <label>Início<input type="datetime-local" value={data.scheduled_start?String(data.scheduled_start).slice(0,16):""} onChange={e=>setData({...data,scheduled_start:e.target.value})}/></label>
-          <label>Fim<input type="datetime-local" value={data.scheduled_end?String(data.scheduled_end).slice(0,16):""} onChange={e=>setData({...data,scheduled_end:e.target.value})}/></label>
+          <label>Início<input type="datetime-local" value={isoToLocalInput(data.scheduled_start)} onChange={e=>setData({...data,scheduled_start:e.target.value})}/></label>
+          <label>Fim<input type="datetime-local" value={isoToLocalInput(data.scheduled_end)} onChange={e=>setData({...data,scheduled_end:e.target.value})}/></label>
           <label className="span2">Descrição<textarea value={data.description||""} onChange={e=>setData({...data,description:e.target.value})}/></label>
           <label className="check"><input type="checkbox" checked={!!data.billable} onChange={e=>setData({...data,billable:e.target.checked})}/> A faturar</label>
           <label>Valor<input type="number" step="0.01" value={data.amount??""} onChange={e=>setData({...data,amount:e.target.value})}/></label>
@@ -280,6 +285,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
 
 function OperationsMap({workspace, refresh}) {
   const [services, setServices] = useState([]);
+  const geocodeCache = React.useRef(new Map());
   const [filter, setFilter] = useState("all");
   const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState("");
@@ -291,7 +297,7 @@ function OperationsMap({workspace, refresh}) {
       if (!workspace?.id) return;
       const [{ data, error: queryError }, { data: clientLocations }] = await Promise.all([
         supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
-        supabase.from("clients").select("id,latitude,longitude").eq("workspace_id", workspace.id),
+        supabase.from("clients").select("id,name,address,postal_code,city,latitude,longitude").eq("workspace_id", workspace.id),
       ]);
       if (queryError) setError(queryError.message); else {
         const locations = new Map((clientLocations || []).map(client => [client.id, client]));
@@ -313,25 +319,47 @@ function OperationsMap({workspace, refresh}) {
   }, []);
 
   useEffect(() => {
-    if (!mapReady || !mapRef.current || !window.google?.maps) return;
-    const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
-    markersRef.current.forEach(marker => marker.setMap(null));
-    markersRef.current = [];
-    const color = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
-    const visible = services.filter(service => filter === "all" || service.board_status === filter).filter(service => service.latitude && service.longitude);
+  if (!mapReady || !mapRef.current || !window.google?.maps) return;
+  let cancelled = false;
+  const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
+  markersRef.current.forEach(marker => marker.setMap(null));
+  markersRef.current = [];
+  const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
+  const geocoder = new window.google.maps.Geocoder();
+  const addressOf = service => [service.address, service.postal_code, service.city, "Portugal"].filter(Boolean).join(", ");
+  async function resolvePosition(service) {
+    const lat = Number(service.latitude); const lng = Number(service.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    const address = addressOf(service); if (!address) return null;
+    if (geocodeCache.current.has(address)) return geocodeCache.current.get(address);
+    const result = await new Promise(resolve => geocoder.geocode({ address, region: "PT" }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
+    geocodeCache.current.set(address, result); return result;
+  }
+  async function renderMarkers() {
+    const candidates = services.filter(service => filter === "all" || service.board_status === filter);
+    const resolved = await Promise.all(candidates.map(async service => ({ service, position: await resolvePosition(service) })));
+    if (cancelled) return;
+    const visible = resolved.filter(item => item.position);
     const bounds = new window.google.maps.LatLngBounds();
-    visible.forEach(service => {
-      const marker = new window.google.maps.Marker({ map, position: { lat: Number(service.latitude), lng: Number(service.longitude) }, title: `${service.client_name || "Cliente"} — ${service.title}`, label: { text: "●", color: color[service.board_status] || color.pending, fontSize: "28px" } });
-      const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}</small></div>` });
-      marker.addListener("click", () => info.open({ map, anchor: marker })); markersRef.current.push(marker); bounds.extend(marker.getPosition());
+    visible.forEach(({ service, position }) => {
+      const statusColor = colors[service.board_status] || colors.pending;
+      const marker = new window.google.maps.Marker({ map, position, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
+      const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}<br/>${addressOf(service) || "Morada não indicada"}</small></div>` });
+      marker.addListener("click", () => info.open({ map, anchor: marker })); markersRef.current.push(marker); bounds.extend(position);
     });
     if (visible.length) map.fitBounds(bounds, 70);
+  }
+  renderMarkers();
+  return () => { cancelled = true; markersRef.current.forEach(marker => marker.setMap(null)); };
   }, [mapReady, services, filter]);
 
-  const counts = ["pending", "scheduled", "in_progress"].map(status => ({ status, count: services.filter(service => service.board_status === status).length }));
-  return <div><Header title="Mapa operacional" subtitle="Visualize os serviços por localização, estado e prioridade" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendentes</option><option value="scheduled">Agendados</option><option value="in_progress">Em curso</option><option value="completed">Concluídos</option></select>}/>
-    <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status}><i/><span>{status === "pending" ? "Pendentes" : status === "scheduled" ? "Agendados" : "Em curso"}</span><strong>{count}</strong></div>)}</div>
-    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{services.filter(service => service.latitude && service.longitude).length} localizações disponíveis</span></div><small>Selecione um marcador para ver os detalhes</small></div>{error ? <div className="map-message alert danger">{error}</div> : <div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/>}</section>
+  const statusLabels = { pending: "Pendentes", scheduled: "Agendados", in_progress: "Em curso", completed: "Concluídos", invoiced: "Faturados", cancelled: "Cancelados" };
+  const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
+  const counts = Object.keys(statusLabels).map(status => ({ status, count: services.filter(service => service.board_status === status).length }));
+  return <div><Header title="Mapa operacional" subtitle="Visualize os serviços por localização, estado e prioridade" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
+  <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
+
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{services.filter(service => Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)) || service.address || service.postal_code || service.city).length} localizações disponíveis</span></div><small>Selecione um marcador para ver os detalhes</small></div>{error ? <div className="map-message alert danger">{error}</div> : <div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/>}</section>
     <p className="map-note">Os serviços só aparecem no mapa quando o cliente tem latitude e longitude. Adicione essas coordenadas nos dados do cliente para ativar a localização.</p>
   </div>;
 }
@@ -341,16 +369,18 @@ function Services({workspace, setRefresh}) {
   const [rows,setRows]=useState([]),[clients,setClients]=useState([]),[techs,setTechs]=useState([]);
   const blank={title:"",description:"",client_id:"",technician_id:"",status:"pending",priority:"normal",service_type:"",machine:"",scheduled_start:"",scheduled_end:"",billable:false,amount:"",notes:""};
   const [form,setForm]=useState(blank);
-  async function load(){if(!workspace?.id)return;const [a,b,c]=await Promise.all([supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),supabase.from("clients").select("id,name").eq("workspace_id",workspace.id).order("name"),supabase.from("technicians").select("id,name").eq("workspace_id",workspace.id).eq("active",true).order("name")]);setRows(a.data||[]);setClients(b.data||[]);setTechs(c.data||[])}
+  async function load(){if(!workspace?.id)return;const [a,b,c]=await Promise.all([supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),supabase.from("clients").select("id,name,address,postal_code,city,latitude,longitude").eq("workspace_id",workspace.id).order("name"),supabase.from("technicians").select("id,name").eq("workspace_id",workspace.id).eq("active",true).order("name")]);setRows(a.data||[]);setClients(b.data||[]);setTechs(c.data||[])}
   useEffect(()=>{load()},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel("services-live-list").on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
   const filtered=rows.filter(r=>(status==="all"||r.board_status===status)&&((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase().includes(q.toLowerCase()));
-  async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:form.amount?Number(form.amount):null,scheduled_start:form.scheduled_start||null,scheduled_end:form.scheduled_end||null};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
+  const selectedClient=clients.find(client=>String(client.id)===String(form.client_id));
+  const estimate=serviceEstimate(selectedClient,form.scheduled_start,form.scheduled_end);
+  async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:Number(estimate.amount.toFixed(2)),billable:true,scheduled_start:localDateTimeToIso(form.scheduled_start),scheduled_end:localDateTimeToIso(form.scheduled_end),status:form.scheduled_start&&form.status==="pending"?"scheduled":form.status};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
   async function move(id,newStatus){const {error}=await supabase.from("services").update({status:newStatus,invoiced:newStatus==="completed"?false:false}).eq("id",id);if(error)alert(error.message);else{load();setRefresh?.(x=>x+1)}}
   return <div><Header title="Serviços" subtitle="Gestão operacional e acompanhamento das intervenções" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo serviço</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente, serviço ou técnico…" value={q} onChange={e=>setQ(e.target.value)}/></div><select value={status} onChange={e=>setStatus(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="invoiced">Faturado</option></select></div>
     <div className="panel"><ServiceTable rows={filtered} onSelect={setDetail}/><div className="quick-actions">{filtered.slice(0,10).map(r=><div className="quick-row" key={r.id}><button className="table-link" onClick={()=>setDetail(r)}>{r.client_name} — {r.title}</button><div><select value={r.status} onChange={e=>move(r.id,e.target.value)}><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="cancelled">Cancelado</option></select></div></div>)}</div></div>
-    {open&&<Modal title="Novo serviço" close={()=>setOpen(false)}><form onSubmit={save} className="form-grid service-form"><label>Título<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label><label>Cliente<select required value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})}><option value="">Selecionar…</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Técnico<select value={form.technician_id} onChange={e=>setForm({...form,technician_id:e.target.value||null})}><option value="">Por atribuir</option>{techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label>Tipo<input value={form.service_type} onChange={e=>setForm({...form,service_type:e.target.value})}/></label><label>Máquina/equipamento<input value={form.machine} onChange={e=>setForm({...form,machine:e.target.value})}/></label><label>Prioridade<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></label><label>Início<input type="datetime-local" value={form.scheduled_start} onChange={e=>setForm({...form,scheduled_start:e.target.value})}/></label><label>Fim<input type="datetime-local" value={form.scheduled_end} onChange={e=>setForm({...form,scheduled_end:e.target.value})}/></label><label className="span2">Descrição<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label className="check"><input type="checkbox" checked={form.billable} onChange={e=>setForm({...form,billable:e.target.checked})}/> A faturar</label><label>Valor<input type="number" step="0.01" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/></label><label className="span2">Notas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary">Criar serviço</button></div></form></Modal>}
+    {open&&<Modal title="Novo serviço" close={()=>setOpen(false)}><form onSubmit={save} className="form-grid service-form"><label>Título<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label><label>Cliente<select required value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})}><option value="">Selecionar…</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Técnico<select value={form.technician_id} onChange={e=>setForm({...form,technician_id:e.target.value||null})}><option value="">Por atribuir</option>{techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label>Tipo<input value={form.service_type} onChange={e=>setForm({...form,service_type:e.target.value})}/></label><label>Máquina/equipamento<input value={form.machine} onChange={e=>setForm({...form,machine:e.target.value})}/></label><label>Prioridade<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></label><label>Início<input type="datetime-local" value={form.scheduled_start} onChange={e=>setForm({...form,scheduled_start:e.target.value})}/></label><label>Fim<input type="datetime-local" value={form.scheduled_end} onChange={e=>setForm({...form,scheduled_end:e.target.value})}/></label><label className="span2">Descrição<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label className="check"><input type="checkbox" checked={form.billable} onChange={e=>setForm({...form,billable:e.target.checked})}/> A faturar</label><label>Valor calculado<input type="number" step="0.01" value={estimate.amount.toFixed(2)} readOnly/><small className="field-help">{estimate.durationHours.toFixed(2)} h × € {HOURLY_RATE.toFixed(2)}{estimate.distanceKm!=null?` + ${estimate.distanceKm.toFixed(1)} km (ida e volta) × € ${DISTANCE_RATE.toFixed(2)} · origem: ${estimate.base}`:" · indique coordenadas do cliente para calcular deslocação"}</small></label><label className="span2">Notas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary">Criar serviço</button></div></form></Modal>}
     {detail&&<ServiceDetail service={detail} workspace={workspace} close={()=>setDetail(null)} setRefresh={setRefresh}/>} 
   </div>
 }
@@ -426,6 +456,46 @@ function Technicians({workspace}) {
 
 function todayStart(){const d=new Date();d.setHours(0,0,0,0);return d}
 
+function distanceKm(a,b){
+  const earthRadius=6371;
+  const lat1=a.lat*Math.PI/180, lat2=b.lat*Math.PI/180;
+  const dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180;
+  const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+  return earthRadius*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
+}
+
+function serviceEstimate(client,start,end){
+  const lat=Number(client?.latitude), lng=Number(client?.longitude);
+  const durationHours=start&&end ? Math.max(0,(new Date(end)-new Date(start))/3600000) : 0;
+  if(!Number.isFinite(lat)||!Number.isFinite(lng)) return {durationHours, distanceKm:null, amount:durationHours*HOURLY_RATE, base:null};
+  const origin={lat,lng};
+  const nearest=SERVICE_BASES.map(base=>({...base,distance:distanceKm(origin,base)})).sort((a,b)=>a.distance-b.distance)[0];
+  const roundTripKm=nearest.distance*2;
+  return {durationHours,distanceKm:roundTripKm,amount:durationHours*HOURLY_RATE+roundTripKm*DISTANCE_RATE,base:nearest.name};
+}
+
+function localDateKey(value){
+  if(!value)return "";
+  const text=String(value);
+  if(!/[zZ]|[+-]\d{2}:?\d{2}$/.test(text))return text.slice(0,10);
+  const date=new Date(value);
+  return Number.isNaN(date.getTime())?text.slice(0,10):`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+
+function localDateTimeToIso(value){
+  if(!value)return null;
+  const date=new Date(value);
+  return Number.isNaN(date.getTime())?null:date.toISOString();
+}
+
+function isoToLocalInput(value){
+  if(!value)return "";
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime()))return String(value).slice(0,16);
+  const pad=number=>String(number).padStart(2,"0");
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function isoWeek(date){const d=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate()));const day=d.getUTCDay()||7;d.setUTCDate(d.getUTCDate()+4-day);const yearStart=new Date(Date.UTC(d.getUTCFullYear(),0,1));return Math.ceil((((d-yearStart)/86400000)+1)/7)}
 
 function Parts({workspace}) {
@@ -433,26 +503,32 @@ function Parts({workspace}) {
   return <div><Header title="Peças" subtitle="Stock, referências e utilização em serviços"/><div className="panel"><div className="table-wrap"><table><thead><tr><th>Referência</th><th>Peça</th><th>Stock</th><th>Custo</th><th>Utilizada</th><th>Serviços</th></tr></thead><tbody>{d.data?.map(p=><tr key={p.part_id}><td>{p.reference||"—"}</td><td><strong>{p.name}</strong></td><td>{p.stock_quantity}</td><td>€ {Number(p.unit_cost||0).toFixed(2)}</td><td>{p.quantity_used||0}</td><td>{p.service_count||0}</td></tr>)}</tbody></table></div></div></div>
 }
 
-function Calendar({workspace}) {
+function Calendar({workspace,refresh}) {
   const [weekStart,setWeekStart]=useState(()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);return d});
   const [services,setServices]=useState([]),[techs,setTechs]=useState([]),[availability,setAvailability]=useState([]),[loading,setLoading]=useState(true);
   const days=useMemo(()=>Array.from({length:5},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d}),[weekStart]);
-  const iso=d=>d.toISOString().slice(0,10);
+  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const weekLabel=`Semana ${isoWeek(weekStart)} · ${weekStart.toLocaleDateString("pt-PT",{day:"2-digit",month:"short"})} – ${days[days.length-1]?.toLocaleDateString("pt-PT",{day:"2-digit",month:"short",year:"numeric"})}`;
   async function load(){
     if(!workspace?.id)return;
     setLoading(true);
     const from=iso(days[0]); const queryEnd=new Date(days[days.length-1]); queryEnd.setDate(queryEnd.getDate()+1); const to=iso(queryEnd);
-    const [s,t,a]=await Promise.all([
-      supabase.from("service_calendar").select("*").eq("workspace_id",workspace.id).gte("scheduled_start",from+"T00:00:00").lt("scheduled_start",to+"T23:59:59").order("scheduled_start"),
+    const [s,t,a,c]=await Promise.all([
+      supabase.from("services").select("*").eq("workspace_id",workspace.id).not("scheduled_start","is",null).order("scheduled_start"),
       supabase.from("technicians").select("id,name,active").eq("workspace_id",workspace.id).eq("active",true).order("name"),
-      supabase.from("technician_availability").select("*").eq("workspace_id",workspace.id).gte("availability_date",from).lte("availability_date",to)
+      supabase.from("technician_availability").select("*").eq("workspace_id",workspace.id).gte("availability_date",from).lt("availability_date",to),
+      supabase.from("clients").select("id,name").eq("workspace_id",workspace.id)
     ]);
-    setServices(s.data||[]);setTechs(t.data||[]);setAvailability(a.data||[]);setLoading(false);
+    if (s.error || t.error || a.error || c.error) throw s.error || t.error || a.error || c.error;
+    const technicianNames=new Map((t.data||[]).map(tech=>[String(tech.id),tech.name]));
+    const clientNames=new Map((c.data||[]).map(client=>[String(client.id),client.name]));
+    const weekServices=(s.data||[]).filter(service=>localDateKey(service.scheduled_start)>=from&&localDateKey(service.scheduled_start)<to);
+    setServices(weekServices.map(service=>({...service,client_name:service.client_name||clientNames.get(String(service.client_id))||"Cliente",technician_name:service.technician_name||technicianNames.get(String(service.technician_id))||"Por atribuir"})));
+    setTechs(t.data||[]);setAvailability(a.data||[]);setLoading(false);
   }
-  useEffect(()=>{load()},[workspace?.id,weekStart.toISOString()]);
-  function servicesFor(techId,date){return services.filter(x=>x.technician_id===techId&&x.scheduled_start?.slice(0,10)===iso(date))}
-  function unavailable(techId,date){const a=availability.find(x=>x.technician_id===techId&&x.availability_date===iso(date));return a?.start_time==null&&a?.end_time==null?a:null}
+  useEffect(()=>{load()},[workspace?.id,weekStart.toISOString(),refresh]);
+  function servicesFor(techId,date){return services.filter(x=>String(x.technician_id)===String(techId)&&localDateKey(x.scheduled_start)===iso(date))}
+  function unavailable(techId,date){const a=availability.find(x=>String(x.technician_id)===String(techId)&&String(x.availability_date).slice(0,10)===iso(date));return a?.start_time==null&&a?.end_time==null?a:null}
   return <div><Header title="Calendário" subtitle="Planeamento semanal por técnico e disponibilidade" action={<div className="calendar-nav"><button className="ghost" aria-label="Semana anterior" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()-7))}>‹ <span>Anterior</span></button><button className="today-btn" onClick={()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);setWeekStart(d)}}>Hoje</button><button className="ghost" aria-label="Próxima semana" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+7))}><span>Próxima</span> ›</button></div>}/> 
     <div className="calendar-toolbar"><div><span className="eyebrow">Planeamento</span><strong>{weekLabel}</strong></div><span className="calendar-count">{services.length} {services.length===1?"serviço agendado":"serviços agendados"}</span></div>
     <div className="calendar-legend"><span><i className="legend-dot booked"/> Serviço marcado</span><span><i className="legend-dot unavailable"/> Técnico indisponível</span><span><i className="legend-euro">€</i> A faturar</span></div>
@@ -473,11 +549,11 @@ function ImportCenter({workspace,onRefresh}) {
   const aliases={name:["name","nome","cliente","client","empresa"],contact_name:["contact_name","contacto","contato","responsável","responsavel"],phone:["phone","telefone","telemóvel","telemovel","tel"],email:["email","e-mail","mail"],address:["address","morada","endereço","endereco"],postal_code:["postal_code","código postal","codigo postal","cp"],city:["city","cidade"],title:["title","título","titulo","serviço","servico","descrição","descricao"],description:["description","descrição","descricao","detalhes"],status:["status","estado"],priority:["priority","prioridade"],service_type:["service_type","tipo","tipo de serviço","tipo de servico"],machine:["machine","máquina","maquina","equipamento"],amount:["amount","valor","preço","preco","total"]};
   const normalize=(value)=>String(value??"").trim().toLocaleLowerCase("pt-PT").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"");
   function mapRow(row){const out={};Object.entries(aliases).forEach(([key,names])=>{const found=Object.keys(row).find(k=>names.some(n=>normalize(k)===normalize(n)||normalize(k).includes(normalize(n))));if(found)out[key]=row[found]});return out}
-  async function readPdf(blob){const pdf=await pdfjsLib.getDocument({data:await blob.arrayBuffer()}).promise;let text="";for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i);const content=await page.getTextContent();text+=content.items.map(x=>x.str).join(" ")+"\\n"}return text.split(/\\n|(?=\\b(?:cliente|nome)\\s*[:;-])/i).map(line=>{const email=line.match(/[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}/)?.[0]||"";const phone=line.match(/(?:\\+351\\s*)?9\\d{2}[\\s-]?\\d{3}[\\s-]?\\d{3}/)?.[0]||"";return {name:line.replace(email,"").replace(phone,"").replace(/^(cliente|nome)\\s*[:;-]?/i,"").trim(),email,phone}}).filter(x=>x.name||x.email||x.phone)}
-  async function parse(blob){setMessage("");const ext=blob.name.split(".").pop().toLowerCase();if(ext==="pdf")return readPdf(blob);const workbook=read(await blob.arrayBuffer(),{type:"array",cellDates:true});const all=[];workbook.SheetNames.forEach(sheet=>utils.sheet_to_json(workbook.Sheets[sheet],{defval:""}).forEach(row=>all.push(mapRow(row))));return all.filter(row=>Object.values(row).some(Boolean))}
+  async function readPdf(blob){const { getDocument }=await import("pdfjs-dist");const pdf=await getDocument({data:await blob.arrayBuffer()}).promise;let text="";for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i);const content=await page.getTextContent();text+=content.items.map(x=>x.str).join(" ")+"\\n"}return text.split(/\\n|(?=\\b(?:cliente|nome)\\s*[:;-])/i).map(line=>{const email=line.match(/[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}/)?.[0]||"";const phone=line.match(/(?:\\+351\\s*)?9\\d{2}[\\s-]?\\d{3}[\\s-]?\\d{3}/)?.[0]||"";return {name:line.replace(email,"").replace(phone,"").replace(/^(cliente|nome)\\s*[:;-]?/i,"").trim(),email,phone}}).filter(x=>x.name||x.email||x.phone)}
+  async function parse(blob){setMessage("");const ext=blob.name.split(".").pop().toLowerCase();if(ext==="pdf")return readPdf(blob);const { read, utils }=await import("xlsx");const workbook=read(await blob.arrayBuffer(),{type:"array",cellDates:true});const all=[];workbook.SheetNames.forEach(sheet=>utils.sheet_to_json(workbook.Sheets[sheet],{defval:""}).forEach(row=>all.push(mapRow(row))));return all.filter(row=>Object.values(row).some(Boolean))}
   async function onFile(e){const selected=e.target.files?.[0];if(!selected)return;setFile(selected);try{const parsed=await parse(selected);setRows(parsed);setMessage(`${parsed.length} registos reconhecidos em ${selected.name}.`)}catch(error){setRows([]);setMessage(`Não foi possível ler o ficheiro: ${error.message}`)}}
   async function importRows(){if(!workspace?.id||!rows.length)return;setBusy(true);const user=(await supabase.auth.getUser()).data.user?.id;const cleaned=rows.map(r=>kind==="clients"?{name:r.name||r.client||"Cliente importado",contact_name:r.contact_name||null,phone:r.phone||null,email:r.email||null,address:r.address||null,postal_code:r.postal_code||null,city:r.city||null,notes:r.notes||null,workspace_id:workspace.id}:{title:r.title||"Serviço importado",description:r.description||null,status:["pending","scheduled","in_progress","completed","cancelled"].includes(normalize(r.status).replace(" ","_"))?normalize(r.status).replace(" ","_"):"pending",priority:["low","normal","high","urgent"].includes(normalize(r.priority))?normalize(r.priority):"normal",service_type:r.service_type||null,machine:r.machine||null,amount:r.amount?Number(String(r.amount).replace(",",".")):null,workspace_id:workspace.id,created_by:user,client_id:null});const {error}=await supabase.from(kind).insert(cleaned);setBusy(false);if(error)return setMessage(`Importação interrompida: ${error.message}`);setMessage(`${cleaned.length} ${kind==="clients"?"clientes":"serviços"} importados com sucesso.`);setRows([]);setFile(null);onRefresh?.(x=>x+1)}
-  function downloadTemplate(){const sample=kind==="clients"?[{Nome:"Empresa Exemplo",Contacto:"João Silva",Telefone:"912 345 678",Email:"geral@empresa.pt",Morada:"Rua Central 1",Cidade:"Porto","Código postal":"4000-000"}]:[{Título:"Manutenção preventiva",Estado:"pending",Prioridade:"normal",Tipo:"Manutenção",Equipamento:"Máquina 1",Valor:"120"}];const sheet=utils.json_to_sheet(sample);const book=utils.book_new();utils.book_append_sheet(book,sheet,"Importação");writeFile(book,`modelo-${kind}.xlsx`)}
+  async function downloadTemplate(){const { utils, writeFile }=await import("xlsx");const sample=kind==="clients"?[{Nome:"Empresa Exemplo",Contacto:"João Silva",Telefone:"912 345 678",Email:"geral@empresa.pt",Morada:"Rua Central 1",Cidade:"Porto","Código postal":"4000-000"}]:[{Título:"Manutenção preventiva",Estado:"pending",Prioridade:"normal",Tipo:"Manutenção",Equipamento:"Máquina 1",Valor:"120"}];const sheet=utils.json_to_sheet(sample);const book=utils.book_new();utils.book_append_sheet(book,sheet,"Importação");writeFile(book,`modelo-${kind}.xlsx`)}
   return <div><Header title="Importar dados" subtitle="Traga informação de clientes e serviços para o PACK4 com validação e pré-visualização"/><div className="import-layout"><section className="panel import-card"><div className="import-icon"><Upload size={22}/></div><h2>Importar ficheiro</h2><p className="muted">Aceitamos Excel (.xlsx, .xls) e PDF. Os dados são lidos localmente antes de serem enviados.</p><label className="file-drop"><input type="file" accept=".xlsx,.xls,.pdf" onChange={onFile}/><FileSpreadsheet size={24}/><strong>{file?file.name:"Escolher ficheiro"}</strong><span>Clique para selecionar ou arraste para aqui</span></label><div className="import-options"><label>Tipo de dados<select value={kind} onChange={e=>setKind(e.target.value)}><option value="clients">Clientes</option><option value="services">Serviços</option></select></label><button className="ghost" onClick={downloadTemplate}><Download size={16}/> Descarregar modelo</button></div>{message&&<div className={`alert ${message.includes("sucesso")?"success":"info"}`}>{message}</div>}</section><section className="panel import-preview"><div className="panel-head"><div><h2>Pré-visualização</h2><p className="muted">Confirme os dados antes de importar.</p></div><span className="status blue">{rows.length} linhas</span></div>{rows.length?<><div className="import-table"><table><thead><tr>{Object.keys(rows[0]).slice(0,6).map(k=><th key={k}>{k}</th>)}</tr></thead><tbody>{rows.slice(0,8).map((row,i)=><tr key={i}>{Object.keys(rows[0]).slice(0,6).map(k=><td key={k}>{String(row[k]||"—")}</td>)}</tr>)}</tbody></table></div><button className="primary wide" onClick={importRows} disabled={busy}>{busy?"A importar…":`Importar ${rows.length} ${kind==="clients"?"clientes":"serviços"}`}</button></>:<div className="import-empty"><FileText size={28}/><strong>A pré-visualização aparecerá aqui</strong><span>Use um modelo ou carregue um ficheiro existente.</span></div>}</section></div></div>
 }
 

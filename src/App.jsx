@@ -278,6 +278,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
 
 function OperationsMap({workspace, refresh}) {
   const [services, setServices] = useState([]);
+  const geocodeCache = React.useRef(new Map());
   const [filter, setFilter] = useState("all");
   const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState("");
@@ -289,7 +290,7 @@ function OperationsMap({workspace, refresh}) {
       if (!workspace?.id) return;
       const [{ data, error: queryError }, { data: clientLocations }] = await Promise.all([
         supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
-        supabase.from("clients").select("id,latitude,longitude").eq("workspace_id", workspace.id),
+        supabase.from("clients").select("id,name,address,postal_code,city,latitude,longitude").eq("workspace_id", workspace.id),
       ]);
       if (queryError) setError(queryError.message); else {
         const locations = new Map((clientLocations || []).map(client => [client.id, client]));
@@ -311,20 +312,38 @@ function OperationsMap({workspace, refresh}) {
   }, []);
 
   useEffect(() => {
-    if (!mapReady || !mapRef.current || !window.google?.maps) return;
-    const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
-    markersRef.current.forEach(marker => marker.setMap(null));
-    markersRef.current = [];
+  if (!mapReady || !mapRef.current || !window.google?.maps) return;
+  let cancelled = false;
+  const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
+  markersRef.current.forEach(marker => marker.setMap(null));
+  markersRef.current = [];
   const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
-  const visible = services.filter(service => filter === "all" || service.board_status === filter).filter(service => Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)));
-  const bounds = new window.google.maps.LatLngBounds();
-  visible.forEach(service => {
-  const statusColor = colors[service.board_status] || colors.pending;
-  const marker = new window.google.maps.Marker({ map, position: { lat: Number(service.latitude), lng: Number(service.longitude) }, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
-  const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}</small></div>` });
-      marker.addListener("click", () => info.open({ map, anchor: marker })); markersRef.current.push(marker); bounds.extend(marker.getPosition());
+  const geocoder = new window.google.maps.Geocoder();
+  const addressOf = service => [service.address, service.postal_code, service.city, "Portugal"].filter(Boolean).join(", ");
+  async function resolvePosition(service) {
+    const lat = Number(service.latitude); const lng = Number(service.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    const address = addressOf(service); if (!address) return null;
+    if (geocodeCache.current.has(address)) return geocodeCache.current.get(address);
+    const result = await new Promise(resolve => geocoder.geocode({ address, region: "PT" }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
+    geocodeCache.current.set(address, result); return result;
+  }
+  async function renderMarkers() {
+    const candidates = services.filter(service => filter === "all" || service.board_status === filter);
+    const resolved = await Promise.all(candidates.map(async service => ({ service, position: await resolvePosition(service) })));
+    if (cancelled) return;
+    const visible = resolved.filter(item => item.position);
+    const bounds = new window.google.maps.LatLngBounds();
+    visible.forEach(({ service, position }) => {
+      const statusColor = colors[service.board_status] || colors.pending;
+      const marker = new window.google.maps.Marker({ map, position, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
+      const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}<br/>${addressOf(service) || "Morada não indicada"}</small></div>` });
+      marker.addListener("click", () => info.open({ map, anchor: marker })); markersRef.current.push(marker); bounds.extend(position);
     });
     if (visible.length) map.fitBounds(bounds, 70);
+  }
+  renderMarkers();
+  return () => { cancelled = true; markersRef.current.forEach(marker => marker.setMap(null)); };
   }, [mapReady, services, filter]);
 
   const statusLabels = { pending: "Pendentes", scheduled: "Agendados", in_progress: "Em curso", completed: "Concluídos", invoiced: "Faturados", cancelled: "Cancelados" };
@@ -333,7 +352,7 @@ function OperationsMap({workspace, refresh}) {
   return <div><Header title="Mapa operacional" subtitle="Visualize os serviços por localização, estado e prioridade" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
   <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
 
-    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{services.filter(service => service.latitude && service.longitude).length} localizações disponíveis</span></div><small>Selecione um marcador para ver os detalhes</small></div>{error ? <div className="map-message alert danger">{error}</div> : <div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/>}</section>
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{services.filter(service => Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)) || service.address || service.postal_code || service.city).length} localizações disponíveis</span></div><small>Selecione um marcador para ver os detalhes</small></div>{error ? <div className="map-message alert danger">{error}</div> : <div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/>}</section>
     <p className="map-note">Os serviços só aparecem no mapa quando o cliente tem latitude e longitude. Adicione essas coordenadas nos dados do cliente para ativar a localização.</p>
   </div>;
 }
@@ -347,7 +366,7 @@ function Services({workspace, setRefresh}) {
   useEffect(()=>{load()},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel("services-live-list").on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
   const filtered=rows.filter(r=>(status==="all"||r.board_status===status)&&((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase().includes(q.toLowerCase()));
-  async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:form.amount?Number(form.amount):null,scheduled_start:form.scheduled_start||null,scheduled_end:form.scheduled_end||null};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
+  async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:form.amount?Number(form.amount):null,scheduled_start:form.scheduled_start||null,scheduled_end:form.scheduled_end||null,status:form.scheduled_start&&form.status==="pending"?"scheduled":form.status};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
   async function move(id,newStatus){const {error}=await supabase.from("services").update({status:newStatus,invoiced:newStatus==="completed"?false:false}).eq("id",id);if(error)alert(error.message);else{load();setRefresh?.(x=>x+1)}}
   return <div><Header title="Serviços" subtitle="Gestão operacional e acompanhamento das intervenções" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo serviço</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente, serviço ou técnico…" value={q} onChange={e=>setQ(e.target.value)}/></div><select value={status} onChange={e=>setStatus(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="invoiced">Faturado</option></select></div>
@@ -448,7 +467,7 @@ function Calendar({workspace}) {
     const [s,t,a]=await Promise.all([
       supabase.from("service_calendar").select("*").eq("workspace_id",workspace.id).gte("scheduled_start",from+"T00:00:00").lt("scheduled_start",to+"T23:59:59").order("scheduled_start"),
       supabase.from("technicians").select("id,name,active").eq("workspace_id",workspace.id).eq("active",true).order("name"),
-      supabase.from("technician_availability").select("*").eq("workspace_id",workspace.id).gte("availability_date",from).lte("availability_date",to)
+      supabase.from("technician_availability").select("*").eq("workspace_id",workspace.id).gte("availability_date",from).lt("availability_date",to)
     ]);
     setServices(s.data||[]);setTechs(t.data||[]);setAvailability(a.data||[]);setLoading(false);
   }

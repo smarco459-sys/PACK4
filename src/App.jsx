@@ -7,6 +7,13 @@ import {
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
+const HOURLY_RATE = 75;
+const DISTANCE_RATE = 0.75;
+const SERVICE_BASES = [
+  { name: "PACK4 Soluções para indústria", lat: 38.9722, lng: -9.2305 },
+  { name: "Mafra", lat: 38.9369, lng: -9.3276 },
+];
+
 const nav = [
   ["/", "Dashboard", LayoutDashboard],
   ["/servicos", "Serviços", Wrench],
@@ -362,16 +369,18 @@ function Services({workspace, setRefresh}) {
   const [rows,setRows]=useState([]),[clients,setClients]=useState([]),[techs,setTechs]=useState([]);
   const blank={title:"",description:"",client_id:"",technician_id:"",status:"pending",priority:"normal",service_type:"",machine:"",scheduled_start:"",scheduled_end:"",billable:false,amount:"",notes:""};
   const [form,setForm]=useState(blank);
-  async function load(){if(!workspace?.id)return;const [a,b,c]=await Promise.all([supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),supabase.from("clients").select("id,name").eq("workspace_id",workspace.id).order("name"),supabase.from("technicians").select("id,name").eq("workspace_id",workspace.id).eq("active",true).order("name")]);setRows(a.data||[]);setClients(b.data||[]);setTechs(c.data||[])}
+  async function load(){if(!workspace?.id)return;const [a,b,c]=await Promise.all([supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),supabase.from("clients").select("id,name,address,postal_code,city,latitude,longitude").eq("workspace_id",workspace.id).order("name"),supabase.from("technicians").select("id,name").eq("workspace_id",workspace.id).eq("active",true).order("name")]);setRows(a.data||[]);setClients(b.data||[]);setTechs(c.data||[])}
   useEffect(()=>{load()},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel("services-live-list").on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
   const filtered=rows.filter(r=>(status==="all"||r.board_status===status)&&((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase().includes(q.toLowerCase()));
-  async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:form.amount?Number(form.amount):null,scheduled_start:localDateTimeToIso(form.scheduled_start),scheduled_end:localDateTimeToIso(form.scheduled_end),status:form.scheduled_start&&form.status==="pending"?"scheduled":form.status};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
+  const selectedClient=clients.find(client=>String(client.id)===String(form.client_id));
+  const estimate=serviceEstimate(selectedClient,form.scheduled_start,form.scheduled_end);
+  async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:Number(estimate.amount.toFixed(2)),billable:true,scheduled_start:localDateTimeToIso(form.scheduled_start),scheduled_end:localDateTimeToIso(form.scheduled_end),status:form.scheduled_start&&form.status==="pending"?"scheduled":form.status};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
   async function move(id,newStatus){const {error}=await supabase.from("services").update({status:newStatus,invoiced:newStatus==="completed"?false:false}).eq("id",id);if(error)alert(error.message);else{load();setRefresh?.(x=>x+1)}}
   return <div><Header title="Serviços" subtitle="Gestão operacional e acompanhamento das intervenções" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo serviço</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente, serviço ou técnico…" value={q} onChange={e=>setQ(e.target.value)}/></div><select value={status} onChange={e=>setStatus(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="invoiced">Faturado</option></select></div>
     <div className="panel"><ServiceTable rows={filtered} onSelect={setDetail}/><div className="quick-actions">{filtered.slice(0,10).map(r=><div className="quick-row" key={r.id}><button className="table-link" onClick={()=>setDetail(r)}>{r.client_name} — {r.title}</button><div><select value={r.status} onChange={e=>move(r.id,e.target.value)}><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="cancelled">Cancelado</option></select></div></div>)}</div></div>
-    {open&&<Modal title="Novo serviço" close={()=>setOpen(false)}><form onSubmit={save} className="form-grid service-form"><label>Título<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label><label>Cliente<select required value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})}><option value="">Selecionar…</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Técnico<select value={form.technician_id} onChange={e=>setForm({...form,technician_id:e.target.value||null})}><option value="">Por atribuir</option>{techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label>Tipo<input value={form.service_type} onChange={e=>setForm({...form,service_type:e.target.value})}/></label><label>Máquina/equipamento<input value={form.machine} onChange={e=>setForm({...form,machine:e.target.value})}/></label><label>Prioridade<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></label><label>Início<input type="datetime-local" value={form.scheduled_start} onChange={e=>setForm({...form,scheduled_start:e.target.value})}/></label><label>Fim<input type="datetime-local" value={form.scheduled_end} onChange={e=>setForm({...form,scheduled_end:e.target.value})}/></label><label className="span2">Descrição<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label className="check"><input type="checkbox" checked={form.billable} onChange={e=>setForm({...form,billable:e.target.checked})}/> A faturar</label><label>Valor<input type="number" step="0.01" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/></label><label className="span2">Notas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary">Criar serviço</button></div></form></Modal>}
+    {open&&<Modal title="Novo serviço" close={()=>setOpen(false)}><form onSubmit={save} className="form-grid service-form"><label>Título<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label><label>Cliente<select required value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})}><option value="">Selecionar…</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Técnico<select value={form.technician_id} onChange={e=>setForm({...form,technician_id:e.target.value||null})}><option value="">Por atribuir</option>{techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label>Tipo<input value={form.service_type} onChange={e=>setForm({...form,service_type:e.target.value})}/></label><label>Máquina/equipamento<input value={form.machine} onChange={e=>setForm({...form,machine:e.target.value})}/></label><label>Prioridade<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option><option value="urgent">Urgente</option></select></label><label>Início<input type="datetime-local" value={form.scheduled_start} onChange={e=>setForm({...form,scheduled_start:e.target.value})}/></label><label>Fim<input type="datetime-local" value={form.scheduled_end} onChange={e=>setForm({...form,scheduled_end:e.target.value})}/></label><label className="span2">Descrição<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label className="check"><input type="checkbox" checked={form.billable} onChange={e=>setForm({...form,billable:e.target.checked})}/> A faturar</label><label>Valor calculado<input type="number" step="0.01" value={estimate.amount.toFixed(2)} readOnly/><small className="field-help">{estimate.durationHours.toFixed(2)} h × € {HOURLY_RATE.toFixed(2)}{estimate.distanceKm!=null?` + ${estimate.distanceKm.toFixed(1)} km (ida e volta) × € ${DISTANCE_RATE.toFixed(2)} · origem: ${estimate.base}`:" · indique coordenadas do cliente para calcular deslocação"}</small></label><label className="span2">Notas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary">Criar serviço</button></div></form></Modal>}
     {detail&&<ServiceDetail service={detail} workspace={workspace} close={()=>setDetail(null)} setRefresh={setRefresh}/>} 
   </div>
 }
@@ -446,6 +455,24 @@ function Technicians({workspace}) {
 }
 
 function todayStart(){const d=new Date();d.setHours(0,0,0,0);return d}
+
+function distanceKm(a,b){
+  const earthRadius=6371;
+  const lat1=a.lat*Math.PI/180, lat2=b.lat*Math.PI/180;
+  const dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180;
+  const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+  return earthRadius*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
+}
+
+function serviceEstimate(client,start,end){
+  const lat=Number(client?.latitude), lng=Number(client?.longitude);
+  const durationHours=start&&end ? Math.max(0,(new Date(end)-new Date(start))/3600000) : 0;
+  if(!Number.isFinite(lat)||!Number.isFinite(lng)) return {durationHours, distanceKm:null, amount:durationHours*HOURLY_RATE, base:null};
+  const origin={lat,lng};
+  const nearest=SERVICE_BASES.map(base=>({...base,distance:distanceKm(origin,base)})).sort((a,b)=>a.distance-b.distance)[0];
+  const roundTripKm=nearest.distance*2;
+  return {durationHours,distanceKm:roundTripKm,amount:durationHours*HOURLY_RATE+roundTripKm*DISTANCE_RATE,base:nearest.name};
+}
 
 function localDateKey(value){
   if(!value)return "";

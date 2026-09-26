@@ -315,20 +315,24 @@ function OperationsMap({workspace, refresh}) {
     const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
     markersRef.current.forEach(marker => marker.setMap(null));
     markersRef.current = [];
-    const color = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
-    const visible = services.filter(service => filter === "all" || service.board_status === filter).filter(service => service.latitude && service.longitude);
-    const bounds = new window.google.maps.LatLngBounds();
-    visible.forEach(service => {
-      const marker = new window.google.maps.Marker({ map, position: { lat: Number(service.latitude), lng: Number(service.longitude) }, title: `${service.client_name || "Cliente"} — ${service.title}`, label: { text: "●", color: color[service.board_status] || color.pending, fontSize: "28px" } });
-      const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}</small></div>` });
+  const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
+  const visible = services.filter(service => filter === "all" || service.board_status === filter).filter(service => Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)));
+  const bounds = new window.google.maps.LatLngBounds();
+  visible.forEach(service => {
+  const statusColor = colors[service.board_status] || colors.pending;
+  const marker = new window.google.maps.Marker({ map, position: { lat: Number(service.latitude), lng: Number(service.longitude) }, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
+  const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}</small></div>` });
       marker.addListener("click", () => info.open({ map, anchor: marker })); markersRef.current.push(marker); bounds.extend(marker.getPosition());
     });
     if (visible.length) map.fitBounds(bounds, 70);
   }, [mapReady, services, filter]);
 
-  const counts = ["pending", "scheduled", "in_progress"].map(status => ({ status, count: services.filter(service => service.board_status === status).length }));
-  return <div><Header title="Mapa operacional" subtitle="Visualize os serviços por localização, estado e prioridade" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendentes</option><option value="scheduled">Agendados</option><option value="in_progress">Em curso</option><option value="completed">Concluídos</option></select>}/>
-    <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status}><i/><span>{status === "pending" ? "Pendentes" : status === "scheduled" ? "Agendados" : "Em curso"}</span><strong>{count}</strong></div>)}</div>
+  const statusLabels = { pending: "Pendentes", scheduled: "Agendados", in_progress: "Em curso", completed: "Concluídos", invoiced: "Faturados", cancelled: "Cancelados" };
+  const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
+  const counts = Object.keys(statusLabels).map(status => ({ status, count: services.filter(service => service.board_status === status).length }));
+  return <div><Header title="Mapa operacional" subtitle="Visualize os serviços por localização, estado e prioridade" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
+  <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
+
     <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{services.filter(service => service.latitude && service.longitude).length} localizações disponíveis</span></div><small>Selecione um marcador para ver os detalhes</small></div>{error ? <div className="map-message alert danger">{error}</div> : <div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/>}</section>
     <p className="map-note">Os serviços só aparecem no mapa quando o cliente tem latitude e longitude. Adicione essas coordenadas nos dados do cliente para ativar a localização.</p>
   </div>;

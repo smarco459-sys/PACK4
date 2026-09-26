@@ -454,7 +454,7 @@ function Parts({workspace}) {
   return <div><Header title="Peças" subtitle="Stock, referências e utilização em serviços"/><div className="panel"><div className="table-wrap"><table><thead><tr><th>Referência</th><th>Peça</th><th>Stock</th><th>Custo</th><th>Utilizada</th><th>Serviços</th></tr></thead><tbody>{d.data?.map(p=><tr key={p.part_id}><td>{p.reference||"—"}</td><td><strong>{p.name}</strong></td><td>{p.stock_quantity}</td><td>€ {Number(p.unit_cost||0).toFixed(2)}</td><td>{p.quantity_used||0}</td><td>{p.service_count||0}</td></tr>)}</tbody></table></div></div></div>
 }
 
-function Calendar({workspace}) {
+function Calendar({workspace,refresh}) {
   const [weekStart,setWeekStart]=useState(()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);return d});
   const [services,setServices]=useState([]),[techs,setTechs]=useState([]),[availability,setAvailability]=useState([]),[loading,setLoading]=useState(true);
   const days=useMemo(()=>Array.from({length:5},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d}),[weekStart]);
@@ -464,16 +464,21 @@ function Calendar({workspace}) {
     if(!workspace?.id)return;
     setLoading(true);
     const from=iso(days[0]); const queryEnd=new Date(days[days.length-1]); queryEnd.setDate(queryEnd.getDate()+1); const to=iso(queryEnd);
-    const [s,t,a]=await Promise.all([
-      supabase.from("service_calendar").select("*").eq("workspace_id",workspace.id).gte("scheduled_start",from+"T00:00:00").lt("scheduled_start",to+"T23:59:59").order("scheduled_start"),
+    const [s,t,a,c]=await Promise.all([
+      supabase.from("services").select("*").eq("workspace_id",workspace.id).not("scheduled_start","is",null).gte("scheduled_start",from+"T00:00:00").lt("scheduled_start",to+"T00:00:00").order("scheduled_start"),
       supabase.from("technicians").select("id,name,active").eq("workspace_id",workspace.id).eq("active",true).order("name"),
-      supabase.from("technician_availability").select("*").eq("workspace_id",workspace.id).gte("availability_date",from).lt("availability_date",to)
+      supabase.from("technician_availability").select("*").eq("workspace_id",workspace.id).gte("availability_date",from).lt("availability_date",to),
+      supabase.from("clients").select("id,name").eq("workspace_id",workspace.id)
     ]);
-    setServices(s.data||[]);setTechs(t.data||[]);setAvailability(a.data||[]);setLoading(false);
+    if (s.error || t.error || a.error || c.error) throw s.error || t.error || a.error || c.error;
+    const technicianNames=new Map((t.data||[]).map(tech=>[String(tech.id),tech.name]));
+    const clientNames=new Map((c.data||[]).map(client=>[String(client.id),client.name]));
+    setServices((s.data||[]).map(service=>({...service,client_name:service.client_name||clientNames.get(String(service.client_id))||"Cliente",technician_name:service.technician_name||technicianNames.get(String(service.technician_id))||"Por atribuir"})));
+    setTechs(t.data||[]);setAvailability(a.data||[]);setLoading(false);
   }
-  useEffect(()=>{load()},[workspace?.id,weekStart.toISOString()]);
-  function servicesFor(techId,date){return services.filter(x=>x.technician_id===techId&&x.scheduled_start?.slice(0,10)===iso(date))}
-  function unavailable(techId,date){const a=availability.find(x=>x.technician_id===techId&&x.availability_date===iso(date));return a?.start_time==null&&a?.end_time==null?a:null}
+  useEffect(()=>{load()},[workspace?.id,weekStart.toISOString(),refresh]);
+  function servicesFor(techId,date){return services.filter(x=>String(x.technician_id)===String(techId)&&x.scheduled_start?.slice(0,10)===iso(date))}
+  function unavailable(techId,date){const a=availability.find(x=>String(x.technician_id)===String(techId)&&String(x.availability_date).slice(0,10)===iso(date));return a?.start_time==null&&a?.end_time==null?a:null}
   return <div><Header title="Calendário" subtitle="Planeamento semanal por técnico e disponibilidade" action={<div className="calendar-nav"><button className="ghost" aria-label="Semana anterior" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()-7))}>‹ <span>Anterior</span></button><button className="today-btn" onClick={()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);setWeekStart(d)}}>Hoje</button><button className="ghost" aria-label="Próxima semana" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+7))}><span>Próxima</span> ›</button></div>}/> 
     <div className="calendar-toolbar"><div><span className="eyebrow">Planeamento</span><strong>{weekLabel}</strong></div><span className="calendar-count">{services.length} {services.length===1?"serviço agendado":"serviços agendados"}</span></div>
     <div className="calendar-legend"><span><i className="legend-dot booked"/> Serviço marcado</span><span><i className="legend-dot unavailable"/> Técnico indisponível</span><span><i className="legend-euro">€</i> A faturar</span></div>

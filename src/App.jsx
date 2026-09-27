@@ -390,7 +390,21 @@ function Services({workspace, setRefresh}) {
   const [rows,setRows]=useState([]),[clients,setClients]=useState([]),[techs,setTechs]=useState([]);
   const blank={title:"",description:"",client_id:"",technician_id:"",status:"pending",priority:"normal",service_type:"",machine:"",scheduled_start:"",scheduled_end:"",billable:false,amount:"",notes:""};
   const [form,setForm]=useState(blank);
-  async function load(){if(!workspace?.id)return;const [a,b,c]=await Promise.all([supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),supabase.from("clients").select("id,name,address,postal_code,city,latitude,longitude").eq("workspace_id",workspace.id).order("name"),supabase.from("technicians").select("id,name").eq("workspace_id",workspace.id).eq("active",true).order("name")]);setRows(a.data||[]);setClients(b.data||[]);setTechs(c.data||[])}
+  async function load(){
+    if(!workspace?.id)return;
+    const [a,b,c]=await Promise.all([
+      supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),
+      // Use the complete client row: older databases may not have optional coordinate columns.
+      supabase.from("clients").select("*").eq("workspace_id",workspace.id).order("name"),
+      supabase.from("technicians").select("id,name").eq("workspace_id",workspace.id).eq("active",true).order("name")
+    ]);
+    if(a.error) console.error("[v0] Erro ao carregar serviços:",a.error);
+    if(b.error) console.error("[v0] Erro ao carregar clientes:",b.error);
+    if(c.error) console.error("[v0] Erro ao carregar técnicos:",c.error);
+    setRows(a.data||[]);
+    setClients(b.data||[]);
+    setTechs(c.data||[]);
+  }
   useEffect(()=>{load()},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel("services-live-list").on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
   const filtered=rows.filter(r=>(status==="all"||r.board_status===status)&&((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase().includes(q.toLowerCase()));

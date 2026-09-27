@@ -285,11 +285,15 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
 
 function OperationsMap({workspace, refresh}) {
   const [services, setServices] = useState([]);
-  const geocodeCache = React.useRef(new Map());
   const [filter, setFilter] = useState("all");
   const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [searching, setSearching] = useState(false);
+  const geocodeCache = React.useRef(new Map());
   const mapRef = React.useRef(null);
+  const mapInstance = React.useRef(null);
+  const geocoderRef = React.useRef(null);
   const markersRef = React.useRef([]);
 
   useEffect(() => {
@@ -299,7 +303,8 @@ function OperationsMap({workspace, refresh}) {
         supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
         supabase.from("clients").select("id,name,address,postal_code,city,latitude,longitude").eq("workspace_id", workspace.id),
       ]);
-      if (queryError) setError(queryError.message); else {
+      if (queryError) setError(queryError.message);
+      else {
         const locations = new Map((clientLocations || []).map(client => [client.id, client]));
         setServices((data || []).map(service => ({ ...service, ...(locations.get(service.client_id) || {}) })));
       }
@@ -310,7 +315,7 @@ function OperationsMap({workspace, refresh}) {
   useEffect(() => {
     if (window.google?.maps) { setMapReady(true); return; }
     const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-    if (!key) { setError("Configure a VITE_GOOGLE_MAPS_API_KEY para ativar o mapa."); return; }
+    if (!key) { setError("Configure a chave do Google Maps para ativar o mapa."); return; }
     const script = document.createElement("script");
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry`;
     script.async = true; script.defer = true; script.onload = () => setMapReady(true); script.onerror = () => setError("Não foi possível carregar o Google Maps.");
@@ -319,57 +324,87 @@ function OperationsMap({workspace, refresh}) {
   }, []);
 
   useEffect(() => {
-  if (!mapReady || !mapRef.current || !window.google?.maps) return;
-  let cancelled = false;
-  const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
-  markersRef.current.forEach(marker => marker.setMap(null));
-  markersRef.current = [];
-  const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
-  const geocoder = new window.google.maps.Geocoder();
-  const addressOf = service => [service.address, service.postal_code, service.city, "Portugal"].filter(Boolean).join(", ");
-  async function resolvePosition(service) {
-    const lat = Number(service.latitude); const lng = Number(service.longitude);
-    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
-    const address = addressOf(service); if (!address) return null;
-    if (geocodeCache.current.has(address)) return geocodeCache.current.get(address);
-    const result = await new Promise(resolve => geocoder.geocode({ address, region: "PT" }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
-    geocodeCache.current.set(address, result); return result;
-  }
-  async function renderMarkers() {
-    const candidates = services.filter(service => filter === "all" || service.board_status === filter);
-    const resolved = await Promise.all(candidates.map(async service => ({ service, position: await resolvePosition(service) })));
-    if (cancelled) return;
-    const visible = resolved.filter(item => item.position);
-    const bounds = new window.google.maps.LatLngBounds();
-    visible.forEach(({ service, position }) => {
-      const statusColor = colors[service.board_status] || colors.pending;
-      const marker = new window.google.maps.Marker({ map, position, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
-      const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}<br/>${addressOf(service) || "Morada não indicada"}</small></div>` });
-      marker.addListener("click", () => info.open({ map, anchor: marker })); markersRef.current.push(marker); bounds.extend(position);
-    });
-    if (visible.length) map.fitBounds(bounds, 70);
-  }
-  renderMarkers();
-  return () => { cancelled = true; markersRef.current.forEach(marker => marker.setMap(null)); };
+    if (!mapReady || !mapRef.current || !window.google?.maps) return;
+    let cancelled = false;
+    const map = new window.google.maps.Map(mapRef.current, { center: { lat: 39.5, lng: -8 }, zoom: 7, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
+    mapInstance.current = map;
+    geocoderRef.current = new window.google.maps.Geocoder();
+    const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
+    const addressOf = item => [item.address, item.postal_code, item.city, "Portugal"].filter(Boolean).join(", ");
+    async function resolvePosition(service) {
+      const address = addressOf(service);
+      if (address) {
+        if (geocodeCache.current.has(address)) return geocodeCache.current.get(address);
+        const result = await new Promise(resolve => geocoderRef.current.geocode({ address, region: "PT" }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
+        geocodeCache.current.set(address, result);
+        return result;
+      }
+      const lat = Number(service.latitude); const lng = Number(service.longitude);
+      return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+    }
+    async function renderMarkers() {
+      markersRef.current.forEach(marker => marker.setMap(null));
+      markersRef.current = [];
+      const candidates = services.filter(service => filter === "all" || service.board_status === filter);
+      const resolved = await Promise.all(candidates.map(async service => ({ service, position: await resolvePosition(service) })));
+      if (cancelled) return;
+      const visible = resolved.filter(item => item.position);
+      const bounds = new window.google.maps.LatLngBounds();
+      visible.forEach(({ service, position }) => {
+        const statusColor = colors[service.board_status] || colors.pending;
+        const marker = new window.google.maps.Marker({ map, position, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
+        const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}<br/>${addressOf(service) || "Coordenadas guardadas"}</small></div>` });
+        marker.addListener("click", () => info.open({ map, anchor: marker }));
+        markersRef.current.push(marker); bounds.extend(position);
+      });
+      if (visible.length) map.fitBounds(bounds, 70);
+    }
+    renderMarkers();
+    return () => { cancelled = true; markersRef.current.forEach(marker => marker.setMap(null)); };
   }, [mapReady, services, filter]);
+
+  async function searchLocation(event) {
+    event.preventDefault();
+    const query = search.trim();
+    if (!query || !geocoderRef.current || !mapInstance.current) return;
+    setSearching(true); setError("");
+    geocoderRef.current.geocode({ address: `${query}, Portugal`, region: "PT" }, (results, status) => {
+      setSearching(false);
+      if (status === "OK" && results[0]) { mapInstance.current.setCenter(results[0].geometry.location); mapInstance.current.setZoom(16); }
+      else setError("Não foi possível encontrar essa morada ou código postal.");
+    });
+  }
 
   const statusLabels = { pending: "Pendentes", scheduled: "Agendados", in_progress: "Em curso", completed: "Concluídos", invoiced: "Faturados", cancelled: "Cancelados" };
   const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
   const counts = Object.keys(statusLabels).map(status => ({ status, count: services.filter(service => service.board_status === status).length }));
-  return <div><Header title="Mapa operacional" subtitle="Visualize os serviços por localização, estado e prioridade" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
-  <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
-
-    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{services.filter(service => Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)) || service.address || service.postal_code || service.city).length} localizações disponíveis</span></div><small>Selecione um marcador para ver os detalhes</small></div>{error ? <div className="map-message alert danger">{error}</div> : <div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/>}</section>
-    <p className="map-note">Os serviços só aparecem no mapa quando o cliente tem latitude e longitude. Adicione essas coordenadas nos dados do cliente para ativar a localização.</p>
+  const available = services.filter(service => service.address || service.postal_code || service.city || (Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)))).length;
+  return <div><Header title="Mapa operacional" subtitle="Pesquise por morada ou código postal e veja os serviços por estado" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
+    <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div>{error && <div className="map-message alert danger">{error}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
+    <p className="map-note">A localização é obtida automaticamente através da morada, código postal e cidade da ficha do cliente. As coordenadas guardadas são usadas apenas como alternativa quando não existe morada.</p>
   </div>;
 }
-
 function Services({workspace, setRefresh}) {
   const [q,setQ]=useState(""); const [open,setOpen]=useState(false); const [detail,setDetail]=useState(null); const [status,setStatus]=useState("all");
   const [rows,setRows]=useState([]),[clients,setClients]=useState([]),[techs,setTechs]=useState([]);
   const blank={title:"",description:"",client_id:"",technician_id:"",status:"pending",priority:"normal",service_type:"",machine:"",scheduled_start:"",scheduled_end:"",billable:false,amount:"",notes:""};
   const [form,setForm]=useState(blank);
-  async function load(){if(!workspace?.id)return;const [a,b,c]=await Promise.all([supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),supabase.from("clients").select("id,name,address,postal_code,city,latitude,longitude").eq("workspace_id",workspace.id).order("name"),supabase.from("technicians").select("id,name").eq("workspace_id",workspace.id).eq("active",true).order("name")]);setRows(a.data||[]);setClients(b.data||[]);setTechs(c.data||[])}
+  async function load(){
+    if(!workspace?.id)return;
+    const [a,b,c]=await Promise.all([
+      supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),
+      // Use the complete client row: older databases may not have optional coordinate columns.
+      supabase.from("clients").select("*").eq("workspace_id",workspace.id).order("name"),
+      supabase.from("technicians").select("id,name").eq("workspace_id",workspace.id).eq("active",true).order("name")
+    ]);
+    if(a.error) console.error("[v0] Erro ao carregar serviços:",a.error);
+    if(b.error) console.error("[v0] Erro ao carregar clientes:",b.error);
+    if(c.error) console.error("[v0] Erro ao carregar técnicos:",c.error);
+    setRows(a.data||[]);
+    setClients(b.data||[]);
+    setTechs(c.data||[]);
+  }
   useEffect(()=>{load()},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel("services-live-list").on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
   const filtered=rows.filter(r=>(status==="all"||r.board_status===status)&&((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase().includes(q.toLowerCase()));

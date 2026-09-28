@@ -3,7 +3,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
   BarChart3, Settings, LogOut, Plus, Search, RefreshCw, Euro, Clock3,
-  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin
+  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin, Navigation, Route as RouteIcon
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
@@ -295,6 +295,11 @@ function OperationsMap({workspace, refresh}) {
   const mapInstance = React.useRef(null);
   const geocoderRef = React.useRef(null);
   const markersRef = React.useRef([]);
+  const directionsRenderersRef = React.useRef([]);
+  const [routeBase, setRouteBase] = useState("PACK4 Soluções para indústria");
+  const [routeTechnician, setRouteTechnician] = useState("all");
+  const [routeBusy, setRouteBusy] = useState(false);
+  const [routeMessage, setRouteMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -409,6 +414,31 @@ function OperationsMap({workspace, refresh}) {
     return () => { cancelled = true; markersRef.current.forEach(marker => marker.setMap(null)); };
   }, [mapReady, services, filter]);
 
+  async function planRoutes() {
+    if (!mapInstance.current || !geocoderRef.current || !window.google?.maps) return;
+    setRouteBusy(true); setRouteMessage(""); setError("");
+    directionsRenderersRef.current.forEach(renderer => renderer.setMap(null));
+    directionsRenderersRef.current = [];
+    const selectedBase = SERVICE_BASES.find(base => base.name === routeBase) || SERVICE_BASES[0];
+    const candidates = services.filter(service => service.technician_id && (routeTechnician === "all" || String(service.technician_id) === String(routeTechnician)) && (service.address || service.postal_code || service.city));
+    const technicians = [...new Map(candidates.map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()];
+    if (!candidates.length) { setRouteMessage("Não existem serviços atribuídos a técnicos com morada válida para planear."); setRouteBusy(false); return; }
+    const clean = value => String(value || "").trim();
+    const addressOf = service => [service.address, service.postal_code, service.city, "Portugal"].map(clean).filter(Boolean).join(", ");
+    const geocode = service => new Promise(resolve => geocoderRef.current.geocode({ address: addressOf(service), region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
+    let planned = 0;
+    for (const technician of technicians) {
+      const technicianServices = candidates.filter(service => String(service.technician_id) === String(technician.id));
+      const points = (await Promise.all(technicianServices.map(async service => ({ service, position: await geocode(service) })))).filter(item => item.position);
+      if (!points.length) continue;
+      const renderer = new window.google.maps.DirectionsRenderer({ map: mapInstance.current, suppressMarkers: true, polylineOptions: { strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 } });
+      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: selectedBase, destination: selectedBase, waypoints: points.map(point => ({ location: point.position, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
+      if (route) { renderer.setDirections(route); directionsRenderersRef.current.push(renderer); planned += points.length; }
+    }
+    setRouteMessage(`${planned} serviço${planned === 1 ? "" : "s"} incluído${planned === 1 ? "" : "s"} no planeamento por técnico, com ida e regresso à base selecionada.`);
+    setRouteBusy(false);
+  }
+
   async function searchLocation(event) {
     event.preventDefault();
     const query = search.trim();
@@ -427,7 +457,7 @@ function OperationsMap({workspace, refresh}) {
   const available = services.filter(service => service.address || service.postal_code || service.city || (Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)))).length;
   return <div><Header title="Mapa operacional" subtitle="Pesquise por morada ou código postal e veja os serviços por estado" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
     <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
-    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div>{error && <div className="map-message alert danger">{error}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div><div className="route-planner"><div className="route-planner-title"><RouteIcon size={18}/><div><strong>Planeador de rotas</strong><span>Otimiza a sequência de visitas por técnico</span></div></div><label>Base de partida<select value={routeBase} onChange={e => setRouteBase(e.target.value)}>{SERVICE_BASES.map(base => <option key={base.name} value={base.name}>{base.name}</option>)}</select></label><label>Técnico<select value={routeTechnician} onChange={e => setRouteTechnician(e.target.value)}><option value="all">Todos os técnicos</option>{[...new Map(services.filter(service => service.technician_id).map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()].map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label><button className="primary route-button" type="button" onClick={planRoutes} disabled={routeBusy}><Navigation size={16}/>{routeBusy ? "A calcular…" : "Planear rotas"}</button></div>{routeMessage && <div className="map-message alert success">{routeMessage}</div>}{error && <div className="map-message alert danger">{error}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
     <p className="map-note">A localização é obtida automaticamente através da morada, código postal e cidade da ficha do cliente. As coordenadas guardadas são usadas apenas como alternativa quando não existe morada.</p>
   </div>;
 }

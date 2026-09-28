@@ -305,7 +305,7 @@ function OperationsMap({workspace, refresh}) {
         supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
         // Do not depend on optional coordinate columns: the operational map geocodes
         // the address stored on the client record (address + postal code + city).
-        supabase.from("clients").select("id,name,address,postal_code,city").eq("workspace_id", workspace.id),
+        supabase.from("clients").select("*").eq("workspace_id", workspace.id),
       ]);
       if (cancelled) return;
       if (servicesResult.error) {
@@ -319,10 +319,17 @@ function OperationsMap({workspace, refresh}) {
         return;
       }
       const locations = new Map((clientsResult.data || []).map(client => [String(client.id), client]));
-      setServices((servicesResult.data || []).map(service => ({
-        ...service,
-        ...(locations.get(String(service.client_id)) || {}),
-      })));
+      setServices((servicesResult.data || []).map(service => {
+        const client = locations.get(String(service.client_id)) || {};
+        return {
+          ...service,
+          ...client,
+          client_name: service.client_name || client.name || "Cliente",
+          address: service.address || client.address || client.street || client.morada || "",
+          postal_code: service.postal_code || client.postal_code || client.postcode || client.zip_code || "",
+          city: service.city || client.city || client.locality || "",
+        };
+      }));
     }
     load();
     return () => { cancelled = true; };
@@ -347,23 +354,39 @@ function OperationsMap({workspace, refresh}) {
     geocoderRef.current = new window.google.maps.Geocoder();
     const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
     const clean = value => String(value || "").trim();
-    const addressOf = item => [clean(item.address), clean(item.postal_code), clean(item.city), "Portugal"].filter(Boolean).join(", ");
+    const addressPartsOf = item => [clean(item.address), clean(item.postal_code), clean(item.city)].filter(Boolean);
+    const addressOf = item => [...addressPartsOf(item), "Portugal"].filter(Boolean).join(", ");
+    const addressQueriesOf = item => {
+      const parts = addressPartsOf(item);
+      const queries = [
+        [...parts, "Portugal"].join(", "),
+        [clean(item.postal_code), clean(item.city), "Portugal"].filter(Boolean).join(", "),
+        [clean(item.address), clean(item.city), "Portugal"].filter(Boolean).join(", "),
+        [clean(item.city), "Portugal"].filter(Boolean).join(", "),
+      ];
+      return [...new Set(queries.filter(query => query.length > "Portugal".length))];
+    };
     const escapeHtml = value => String(value || "").replace(/[&<>'"]/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[character]));
     async function resolvePosition(service) {
-      const address = addressOf(service);
-      if (address.length > "Portugal".length) {
-        if (geocodeCache.current.has(address)) return geocodeCache.current.get(address);
+      const queries = addressQueriesOf(service);
+      const cacheKey = queries.join(" | ");
+      if (geocodeCache.current.has(cacheKey)) return geocodeCache.current.get(cacheKey);
+      for (const address of queries) {
         const result = await new Promise(resolve => geocoderRef.current.geocode({
           address,
           region: "PT",
           componentRestrictions: { country: "PT" },
         }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
-        geocodeCache.current.set(address, result);
-        return result;
+        if (result) {
+          geocodeCache.current.set(cacheKey, result);
+          return result;
+        }
       }
-      // Coordinates are only a legacy fallback. New locations always use the client's address.
+      // Coordinates are only a legacy fallback when the client has no usable address.
       const lat = Number(service.latitude); const lng = Number(service.longitude);
-      return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+      const fallback = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+      geocodeCache.current.set(cacheKey, fallback);
+      return fallback;
     }
     async function renderMarkers() {
       markersRef.current.forEach(marker => marker.setMap(null));

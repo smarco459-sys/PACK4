@@ -6,7 +6,24 @@ button, input, select, textarea{font-family:inherit}
 button{border-radius:10px;min-height:42px;font-weight:700;transition:transform .18s ease,box-shadow .18s ease,background .18s ease,border-color .18s ease}
 button:not(:disabled):hover{transform:translateY(-1px)}
 input,select,textarea{border-radius:10px!important;border-color:#d7dfeb!important;background:#fbfcfe!important;color:var(--ink)!important}
-input::placeholder,textarea::placeholder{color:#98a2b3}
+  input::placeholder,textarea::placeholder{color:#98a2b3}
+  .operations-map{overflow:hidden;padding:0}
+  .map-toolbar{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:24px 28px;border-bottom:1px solid var(--line);background:var(--surface)}
+  .map-toolbar>div{display:flex;flex-direction:column;gap:6px;min-width:210px}
+  .map-toolbar strong{font-size:16px;color:var(--navy)}
+  .map-toolbar span,.map-note{font-size:13px;color:var(--muted)}
+  .map-search{display:flex;align-items:center;gap:10px;flex:1;max-width:720px}
+  .map-search input{width:100%;min-height:48px;padding:0 16px;border:1px solid #d7dfeb!important;box-shadow:0 2px 8px rgba(16,33,61,.04)}
+  .map-search .primary{min-height:48px;padding:0 20px;white-space:nowrap}
+  .google-map{height:560px;min-height:420px;margin:0;border:0}
+  .map-note{margin:12px 2px 0;line-height:1.5}
+  .map-message{margin:16px 28px}
+  .map-info{display:flex;flex-direction:column;gap:5px;min-width:190px;padding:4px 2px;color:var(--ink)}
+  .map-info strong{font-size:14px}.map-info span{font-size:13px}.map-info small{color:var(--muted);line-height:1.4}
+  .modal{width:min(1120px,calc(100vw - 64px));border-radius:22px}
+  .modal-head{padding:22px 28px}.modal-body{padding:24px 28px}
+  .modal-actions{padding:18px 28px;gap:12px}
+  @media (max-width:760px){.map-toolbar{align-items:stretch;flex-direction:column;padding:18px}.map-search{max-width:none}.google-map{height:440px}.modal{width:calc(100vw - 24px)}.modal-head,.modal-body,.modal-actions{padding-left:18px;padding-right:18px}}
 .panel,.kpi,.toolbar,.detail-box,.calendar-shell,.operations-map{border-radius:var(--radius)!important;box-shadow:var(--shadow)!important}
 .panel-head{padding:20px 22px!important;border-bottom:1px solid var(--line)}
 .panel-head h2{font-size:16px!important;letter-spacing:-.02em;color:var(--navy)}

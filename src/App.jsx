@@ -330,15 +330,22 @@ function OperationsMap({workspace, refresh}) {
     mapInstance.current = map;
     geocoderRef.current = new window.google.maps.Geocoder();
     const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
-    const addressOf = item => [item.address, item.postal_code, item.city, "Portugal"].filter(Boolean).join(", ");
+    const clean = value => String(value || "").trim();
+    const addressOf = item => [clean(item.address), clean(item.postal_code), clean(item.city), "Portugal"].filter(Boolean).join(", ");
+    const escapeHtml = value => String(value || "").replace(/[&<>'"]/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[character]));
     async function resolvePosition(service) {
       const address = addressOf(service);
-      if (address) {
+      if (address.length > "Portugal".length) {
         if (geocodeCache.current.has(address)) return geocodeCache.current.get(address);
-        const result = await new Promise(resolve => geocoderRef.current.geocode({ address, region: "PT" }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
+        const result = await new Promise(resolve => geocoderRef.current.geocode({
+          address,
+          region: "PT",
+          componentRestrictions: { country: "PT" },
+        }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
         geocodeCache.current.set(address, result);
         return result;
       }
+      // Coordinates are only a legacy fallback. New locations always use the client's address.
       const lat = Number(service.latitude); const lng = Number(service.longitude);
       return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
     }
@@ -353,7 +360,7 @@ function OperationsMap({workspace, refresh}) {
       visible.forEach(({ service, position }) => {
         const statusColor = colors[service.board_status] || colors.pending;
         const marker = new window.google.maps.Marker({ map, position, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
-        const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${service.client_name || "Cliente"}</strong><span>${service.title || "Serviço"}</span><small>${service.technician_name || "Por atribuir"} · ${service.board_status || "pendente"}<br/>${addressOf(service) || "Coordenadas guardadas"}</small></div>` });
+        const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${escapeHtml(service.client_name || "Cliente")}</strong><span>${escapeHtml(service.title || "Serviço")}</span><small>${escapeHtml(service.technician_name || "Por atribuir")} · ${escapeHtml(service.board_status || "pendente")}<br/>${escapeHtml(addressOf(service) || "Coordenadas guardadas")}</small></div>` });
         marker.addListener("click", () => info.open({ map, anchor: marker }));
         markersRef.current.push(marker); bounds.extend(position);
       });

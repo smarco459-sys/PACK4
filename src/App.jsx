@@ -3,7 +3,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
   BarChart3, Settings, LogOut, Plus, Search, RefreshCw, Euro, Clock3,
-  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin
+  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin, Navigation, Route as RouteIcon
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
@@ -295,6 +295,14 @@ function OperationsMap({workspace, refresh}) {
   const mapInstance = React.useRef(null);
   const geocoderRef = React.useRef(null);
   const markersRef = React.useRef([]);
+  const directionsRenderersRef = React.useRef([]);
+  const [routeBase, setRouteBase] = useState("PACK4 Soluções para indústria");
+  const [routeTechnician, setRouteTechnician] = useState("all");
+  const [routeDate, setRouteDate] = useState(new Date().toISOString().slice(0, 10));
+  const [routeBusy, setRouteBusy] = useState(false);
+  const [routeSaving, setRouteSaving] = useState(false);
+  const [routeMessage, setRouteMessage] = useState("");
+  const [plannedRoutes, setPlannedRoutes] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -305,7 +313,7 @@ function OperationsMap({workspace, refresh}) {
         supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
         // Do not depend on optional coordinate columns: the operational map geocodes
         // the address stored on the client record (address + postal code + city).
-        supabase.from("clients").select("id,name,address,postal_code,city").eq("workspace_id", workspace.id),
+        supabase.from("clients").select("*").eq("workspace_id", workspace.id),
       ]);
       if (cancelled) return;
       if (servicesResult.error) {
@@ -319,10 +327,20 @@ function OperationsMap({workspace, refresh}) {
         return;
       }
       const locations = new Map((clientsResult.data || []).map(client => [String(client.id), client]));
-      setServices((servicesResult.data || []).map(service => ({
-        ...service,
-        ...(locations.get(String(service.client_id)) || {}),
-      })));
+      setServices((servicesResult.data || []).map(service => {
+        const client = locations.get(String(service.client_id)) || {};
+        // Keep the service identity intact: spreading the client row here can replace
+        // the service id and makes markers/links point to the wrong record.
+        const firstValue = (...values) => values.find(value => value != null && String(value).trim() !== "") || "";
+        return {
+          ...service,
+          client_name: firstValue(service.client_name, client.name, client.company_name, "Cliente"),
+          address: firstValue(service.address, client.address, client.street, client.street_address, client.morada, client.rua),
+          postal_code: firstValue(service.postal_code, client.postcode, client.zip_code, client.zipcode, client.codigo_postal, client.codigoPostal),
+          city: firstValue(service.city, client.locality, client.municipality, client.cidade, client.concelho),
+          client_address: client,
+        };
+      }));
     }
     load();
     return () => { cancelled = true; };
@@ -347,23 +365,42 @@ function OperationsMap({workspace, refresh}) {
     geocoderRef.current = new window.google.maps.Geocoder();
     const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
     const clean = value => String(value || "").trim();
-    const addressOf = item => [clean(item.address), clean(item.postal_code), clean(item.city), "Portugal"].filter(Boolean).join(", ");
+    const addressPartsOf = item => [clean(item.address), clean(item.postal_code), clean(item.city)].filter(Boolean);
+    const addressOf = item => [...addressPartsOf(item), "Portugal"].filter(Boolean).join(", ");
+    const addressQueriesOf = item => {
+      const address = clean(item.address);
+      const postalCode = clean(item.postal_code).replace(/\s+/g, "");
+      const city = clean(item.city);
+      const postalVariants = [...new Set([postalCode, postalCode.replace("-", " "), postalCode.replace("-", "")].filter(Boolean))];
+      const queries = [
+        ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [address, city, "Portugal"].filter(Boolean).join(", "),
+        ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [city, "Portugal"].filter(Boolean).join(", "),
+      ];
+      return [...new Set(queries.filter(query => query.length > "Portugal".length))];
+    };
     const escapeHtml = value => String(value || "").replace(/[&<>'"]/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[character]));
     async function resolvePosition(service) {
-      const address = addressOf(service);
-      if (address.length > "Portugal".length) {
-        if (geocodeCache.current.has(address)) return geocodeCache.current.get(address);
+      const queries = addressQueriesOf(service);
+      const cacheKey = queries.join(" | ");
+      if (geocodeCache.current.has(cacheKey)) return geocodeCache.current.get(cacheKey);
+      for (const address of queries) {
         const result = await new Promise(resolve => geocoderRef.current.geocode({
           address,
           region: "PT",
           componentRestrictions: { country: "PT" },
         }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
-        geocodeCache.current.set(address, result);
-        return result;
+        if (result) {
+          geocodeCache.current.set(cacheKey, result);
+          return result;
+        }
       }
-      // Coordinates are only a legacy fallback. New locations always use the client's address.
+      // Coordinates are only a legacy fallback when the client has no usable address.
       const lat = Number(service.latitude); const lng = Number(service.longitude);
-      return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+      const fallback = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+      geocodeCache.current.set(cacheKey, fallback);
+      return fallback;
     }
     async function renderMarkers() {
       markersRef.current.forEach(marker => marker.setMap(null));
@@ -386,6 +423,68 @@ function OperationsMap({workspace, refresh}) {
     return () => { cancelled = true; markersRef.current.forEach(marker => marker.setMap(null)); };
   }, [mapReady, services, filter]);
 
+  async function planRoutes() {
+    if (!mapInstance.current || !geocoderRef.current || !window.google?.maps) return;
+    setRouteBusy(true); setRouteMessage(""); setError(""); setPlannedRoutes([]);
+    directionsRenderersRef.current.forEach(renderer => renderer.setMap(null));
+    directionsRenderersRef.current = [];
+    const selectedBase = SERVICE_BASES.find(base => base.name === routeBase) || SERVICE_BASES[0];
+    const candidates = services.filter(service => {
+      const serviceDay = service.scheduled_start ? new Date(service.scheduled_start).toISOString().slice(0, 10) : "";
+      return service.technician_id && serviceDay === routeDate && (routeTechnician === "all" || String(service.technician_id) === String(routeTechnician)) && (service.address || service.postal_code || service.city);
+    });
+    const technicians = [...new Map(candidates.map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()];
+    if (!candidates.length) { setRouteMessage("Não existem serviços atribuídos para este técnico e dia com morada válida."); setRouteBusy(false); return; }
+    const clean = value => String(value || "").trim();
+    const addressOf = service => [service.address, service.postal_code, service.city, "Portugal"].map(clean).filter(Boolean).join(", ");
+    const geocode = service => new Promise(resolve => {
+      const key = addressOf(service);
+      if (geocodeCache.current.has(key)) return resolve(geocodeCache.current.get(key));
+      geocoderRef.current.geocode({ address: key, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => {
+        const position = status === "OK" && results[0] ? results[0].geometry.location : null;
+        geocodeCache.current.set(key, position); resolve(position);
+      });
+    });
+    const planned = [];
+    for (const technician of technicians) {
+      const technicianServices = candidates.filter(service => String(service.technician_id) === String(technician.id));
+      const points = (await Promise.all(technicianServices.map(async service => ({ service, position: await geocode(service) })))).filter(item => item.position);
+      if (!points.length) continue;
+      const renderer = new window.google.maps.DirectionsRenderer({ map: mapInstance.current, suppressMarkers: true, polylineOptions: { strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 } });
+      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: selectedBase, destination: selectedBase, waypoints: points.map(point => ({ location: point.position, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
+      if (!route) continue;
+      renderer.setDirections(route); directionsRenderersRef.current.push(renderer);
+      const ordered = (route.routes[0].waypoint_order || points.map((_, index) => index)).map(index => points[index].service);
+      planned.push({ technician, services: ordered });
+    }
+    setPlannedRoutes(planned);
+    const total = planned.reduce((sum, route) => sum + route.services.length, 0);
+    setRouteMessage(`${total} serviço${total === 1 ? "" : "s"} planeado${total === 1 ? "" : "s"} para ${routeDate.split("-").reverse().join("/")}. A rota já está visível no mapa.`);
+    setRouteBusy(false);
+  }
+
+  async function authorizeRouteOrder() {
+    if (!plannedRoutes.length) return;
+    setRouteSaving(true); setRouteMessage("");
+    try {
+      for (const route of plannedRoutes) {
+        const original = route.services.slice().sort((a, b) => new Date(a.scheduled_start) - new Date(b.scheduled_start));
+        for (let index = 0; index < route.services.length; index += 1) {
+          const current = route.services[index];
+          const slot = original[index];
+          const duration = Math.max(30, (new Date(slot.scheduled_end || slot.scheduled_start).getTime() - new Date(slot.scheduled_start).getTime()) / 60000 || 60);
+          const start = new Date(slot.scheduled_start);
+          const end = new Date(start.getTime() + duration * 60000);
+          const { error: updateError } = await supabase.from("services").update({ scheduled_start: start.toISOString(), scheduled_end: end.toISOString() }).eq("id", current.id);
+          if (updateError) throw updateError;
+        }
+      }
+      setRouteMessage("Ordem autorizada e atualizada na agenda. A rota mantém-se visível no mapa.");
+    } catch (updateError) {
+      setError(`Não foi possível atualizar a agenda: ${updateError.message}`);
+    } finally { setRouteSaving(false); }
+  }
+
   async function searchLocation(event) {
     event.preventDefault();
     const query = search.trim();
@@ -404,7 +503,7 @@ function OperationsMap({workspace, refresh}) {
   const available = services.filter(service => service.address || service.postal_code || service.city || (Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)))).length;
   return <div><Header title="Mapa operacional" subtitle="Pesquise por morada ou código postal e veja os serviços por estado" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
     <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
-    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div>{error && <div className="map-message alert danger">{error}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div><div className="route-planner"><div className="route-planner-title"><RouteIcon size={18}/><div><strong>Planeador de rotas</strong><span>Seleciona o dia e otimiza a sequência de visitas por técnico</span></div></div><label>Dia da agenda<input type="date" value={routeDate} onChange={e => { setRouteDate(e.target.value); setPlannedRoutes([]); }}/></label><label>Base de partida<select value={routeBase} onChange={e => setRouteBase(e.target.value)}>{SERVICE_BASES.map(base => <option key={base.name} value={base.name}>{base.name}</option>)}</select></label><label>Técnico<select value={routeTechnician} onChange={e => setRouteTechnician(e.target.value)}><option value="all">Todos os técnicos</option>{[...new Map(services.filter(service => service.technician_id).map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()].map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label><button className="primary route-button" type="button" onClick={planRoutes} disabled={routeBusy}><Navigation size={16}/>{routeBusy ? "A calcular…" : "Planear rotas"}</button>{plannedRoutes.length > 0 && <button className="secondary route-button" type="button" onClick={authorizeRouteOrder} disabled={routeSaving}>{routeSaving ? "A atualizar agenda…" : "Autorizar ordem na agenda"}</button>}</div>{routeMessage && <div className="map-message alert success">{routeMessage}</div>}{error && <div className="map-message alert danger">{error}</div>}{plannedRoutes.length > 0 && <div className="route-results">{plannedRoutes.map(route => <div className="route-result" key={route.technician.id}><strong>{route.technician.name}</strong><ol>{route.services.map(service => <li key={service.id}>{service.client_name || "Cliente"}<span>{service.title}</span></li>)}</ol></div>)}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
     <p className="map-note">A localização é obtida automaticamente através da morada, código postal e cidade da ficha do cliente. As coordenadas guardadas são usadas apenas como alternativa quando não existe morada.</p>
   </div>;
 }

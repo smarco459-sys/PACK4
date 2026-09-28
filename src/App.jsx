@@ -297,19 +297,35 @@ function OperationsMap({workspace, refresh}) {
   const markersRef = React.useRef([]);
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       if (!workspace?.id) return;
-      const [{ data, error: queryError }, { data: clientLocations }] = await Promise.all([
+      setError("");
+      const [servicesResult, clientsResult] = await Promise.all([
         supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
-        supabase.from("clients").select("id,name,address,postal_code,city,latitude,longitude").eq("workspace_id", workspace.id),
+        // Do not depend on optional coordinate columns: the operational map geocodes
+        // the address stored on the client record (address + postal code + city).
+        supabase.from("clients").select("id,name,address,postal_code,city").eq("workspace_id", workspace.id),
       ]);
-      if (queryError) setError(queryError.message);
-      else {
-        const locations = new Map((clientLocations || []).map(client => [client.id, client]));
-        setServices((data || []).map(service => ({ ...service, ...(locations.get(service.client_id) || {}) })));
+      if (cancelled) return;
+      if (servicesResult.error) {
+        setError(`Não foi possível carregar os serviços: ${servicesResult.error.message}`);
+        setServices([]);
+        return;
       }
+      if (clientsResult.error) {
+        setError(`Não foi possível carregar as fichas de cliente: ${clientsResult.error.message}`);
+        setServices(servicesResult.data || []);
+        return;
+      }
+      const locations = new Map((clientsResult.data || []).map(client => [String(client.id), client]));
+      setServices((servicesResult.data || []).map(service => ({
+        ...service,
+        ...(locations.get(String(service.client_id)) || {}),
+      })));
     }
     load();
+    return () => { cancelled = true; };
   }, [workspace?.id, refresh]);
 
   useEffect(() => {

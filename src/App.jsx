@@ -326,13 +326,16 @@ function OperationsMap({workspace, refresh}) {
       const locations = new Map((clientsResult.data || []).map(client => [String(client.id), client]));
       setServices((servicesResult.data || []).map(service => {
         const client = locations.get(String(service.client_id)) || {};
+        // Keep the service identity intact: spreading the client row here can replace
+        // the service id and makes markers/links point to the wrong record.
+        const firstValue = (...values) => values.find(value => value != null && String(value).trim() !== "") || "";
         return {
           ...service,
-          ...client,
-          client_name: service.client_name || client.name || "Cliente",
-          address: service.address || client.address || client.street || client.morada || "",
-          postal_code: service.postal_code || client.postal_code || client.postcode || client.zip_code || "",
-          city: service.city || client.city || client.locality || "",
+          client_name: firstValue(service.client_name, client.name, client.company_name, "Cliente"),
+          address: firstValue(service.address, client.address, client.street, client.street_address, client.morada, client.rua),
+          postal_code: firstValue(service.postal_code, client.postcode, client.zip_code, client.zipcode, client.codigo_postal, client.codigoPostal),
+          city: firstValue(service.city, client.locality, client.municipality, client.cidade, client.concelho),
+          client_address: client,
         };
       }));
     }
@@ -362,12 +365,15 @@ function OperationsMap({workspace, refresh}) {
     const addressPartsOf = item => [clean(item.address), clean(item.postal_code), clean(item.city)].filter(Boolean);
     const addressOf = item => [...addressPartsOf(item), "Portugal"].filter(Boolean).join(", ");
     const addressQueriesOf = item => {
-      const parts = addressPartsOf(item);
+      const address = clean(item.address);
+      const postalCode = clean(item.postal_code).replace(/\s+/g, "");
+      const city = clean(item.city);
+      const postalVariants = [...new Set([postalCode, postalCode.replace("-", " "), postalCode.replace("-", "")].filter(Boolean))];
       const queries = [
-        [...parts, "Portugal"].join(", "),
-        [clean(item.postal_code), clean(item.city), "Portugal"].filter(Boolean).join(", "),
-        [clean(item.address), clean(item.city), "Portugal"].filter(Boolean).join(", "),
-        [clean(item.city), "Portugal"].filter(Boolean).join(", "),
+        ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [address, city, "Portugal"].filter(Boolean).join(", "),
+        ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [city, "Portugal"].filter(Boolean).join(", "),
       ];
       return [...new Set(queries.filter(query => query.length > "Portugal".length))];
     };

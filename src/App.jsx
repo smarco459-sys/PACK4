@@ -180,21 +180,36 @@ function Dashboard({workspace}) {
     if(error) throw error; return data||[];
   },[workspace?.id]);
   const technicians=useData(async()=>{
-    if(!workspace?.id) return [];
-    const {data,error}=await supabase.from("technician_workload").select("*").eq("workspace_id",workspace.id).eq("active",true).order("open_services",{ascending:false});
-    if(error) throw error; return data||[];
+  if(!workspace?.id) return [];
+  const {data,error}=await supabase.from("technician_workload").select("*").eq("workspace_id",workspace.id).eq("active",true).order("open_services",{ascending:false});
+  if(error) throw error; return data||[];
   },[workspace?.id]);
-
+  const operational=useData(async()=>{
+  if(!workspace?.id) return {today:[],all:[]};
+  const {data,error}=await supabase.from("service_board").select("*").eq("workspace_id",workspace.id);
+  if(error) throw error;
+  const all=data||[], todayKey=localDateKey(new Date());
+  return {all,today:all.filter(row=>row.scheduled_start&&localDateKey(row.scheduled_start)===todayKey)};
+  },[workspace?.id]);
+  const today=operational.data?.today||[], allServices=operational.data?.all||[];
+  const overdue=allServices.filter(row=>row.scheduled_start&&new Date(row.scheduled_start)<new Date()&&!['completed','invoiced','cancelled'].includes(row.board_status)).length;
+  const busyTechnicians=new Set(today.filter(row=>row.technician_id).map(row=>String(row.technician_id))).size;
+  const billed=allServices.filter(row=>row.invoiced).reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const completedValue=allServices.filter(row=>['completed','invoiced'].includes(row.board_status)).reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const averageValue=allServices.length?completedValue/allServices.length:0;
+  const money=value=>`€ ${Number(value||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}`;
   return <div>
-    <Header title="Dashboard" subtitle="Acompanhe a operação técnica e tome decisões com dados em tempo real"
-      action={<button className="icon-btn" onClick={()=>location.reload()}><RefreshCw size={17}/></button>}/>
-    <div className="kpis">
-      <Kpi icon={Clock3} label="Pendentes" value={m.data?.pending_services ?? "—"}/>
-      <Kpi icon={CircleDot} label="Agendados" value={m.data?.scheduled_services ?? "—"}/>
-      <Kpi icon={CheckCircle2} label="Concluídos" value={m.data?.completed_services ?? "—"}/>
-      <Kpi icon={Euro} label="A faturar" value={m.data?.to_invoice_amount != null ? `€ ${Number(m.data.to_invoice_amount).toLocaleString("pt-PT",{minimumFractionDigits:2})}` : "—"}/>
-    </div>
-    <div className="grid-2">
+  <Header title="Dashboard gestor" subtitle="A situação operacional da PACK4 em 10 segundos"
+  action={<button className="icon-btn" onClick={()=>location.reload()}><RefreshCw size={17}/></button>}/>
+  <div className="kpis">
+  <Kpi icon={Clock3} label="Pendentes" value={m.data?.pending_services ?? "—"}/>
+  <Kpi icon={CircleDot} label="Agendados" value={m.data?.scheduled_services ?? "—"}/>
+  <Kpi icon={CheckCircle2} label="Concluídos" value={m.data?.completed_services ?? "—"}/>
+  <Kpi icon={Euro} label="A faturar" value={m.data?.to_invoice_amount != null ? money(m.data.to_invoice_amount) : "—"}/>
+  </div>
+  <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Hoje</span><h2>Operação do dia</h2></div><span className="section-caption">Atualizado em tempo real</span></div><div className="manager-metrics"><Metric label="Serviços hoje" value={today.length}/><Metric label="Técnicos ocupados" value={busyTechnicians}/><Metric label="Técnicos disponíveis" value={Math.max(0,(technicians.data||[]).length-busyTechnicians)}/><Metric label="Serviços atrasados" value={overdue} tone={overdue>0?"danger":"good"}/></div></section>
+  <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Financeiro</span><h2>Visão financeira</h2></div></div><div className="manager-metrics financial"><Metric label="€ faturados" value={money(billed)}/><Metric label="€ em concluídos" value={money(completedValue)}/><Metric label="Valor médio / serviço" value={money(averageValue)}/></div></section>
+  <div className="grid-2">
       <section className="panel"><div className="panel-head"><h2>Serviços recentes</h2><NavLink to="/servicos">Ver todos <ChevronRight size={15}/></NavLink></div>
         {recent.loading ? <Loading/> : recent.error ? <ErrorBox e={recent.error}/> : <ServiceTable rows={recent.data}/>}
       </section>
@@ -205,8 +220,9 @@ function Dashboard({workspace}) {
   </div>;
 }
 
-function Kpi({icon:Icon,label,value}) { return <div className="kpi"><div className="kpi-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong></div></div> }
-function Loading(){return <div className="loading">A carregar…</div>}
+  function Kpi({icon:Icon,label,value}) { return <div className="kpi"><div className="kpi-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong></div></div> }
+  function Metric({label,value,tone="default"}) { return <div className={`manager-metric ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
+  function Loading(){return <div className="loading">A carregar…</div>}
 function ErrorBox({e}){return <div className="alert danger">{e?.message || "Ocorreu um erro."}</div>}
 
 function ServiceTable({rows=[],onSelect}) {

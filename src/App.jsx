@@ -283,8 +283,9 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <label>Valor<input type="number" step="0.01" value={data.amount??""} onChange={e=>setData({...data,amount:e.target.value})}/></label>
           <label className="check"><input type="checkbox" checked={!!data.invoiced} disabled={data.status!=="completed"} onChange={e=>setData({...data,invoiced:e.target.checked})}/> Faturado</label>
           <label>Referência fatura<input value={data.invoice_reference||""} onChange={e=>setData({...data,invoice_reference:e.target.value})}/></label>
-          <label className="span2">Notas<textarea value={data.notes||""} onChange={e=>setData({...data,notes:e.target.value})}/></label>
-        </div>
+  <label className="span2">Notas<textarea value={data.notes||""} onChange={e=>setData({...data,notes:e.target.value})}/></label>
+  <fieldset className="checklist-fieldset span2"><legend>Checklist técnica</legend><div className="service-checklist">{["Contacto com cliente","Diagnóstico","Peças necessárias","Peças disponíveis","Serviço realizado","Teste da máquina","Relatório enviado","Faturado"].map(item=><label key={item}><input type="checkbox" checked={String(data.notes||"").includes(`[${item}]`)} onChange={e=>{const marker=`[${item}]`;const notes=String(data.notes||"");setData({...data,notes:e.target.checked?(notes?`${notes}\n${marker}`:marker):notes.replace(marker," ").replace(/\n\s*\n/g,"\n")})}}/> {item}</label>)}</div></fieldset>
+  </div>
         <div className="modal-actions"><button className="danger-btn" type="button" onClick={removeService} disabled={busy}><Trash2 size={15}/> Eliminar serviço</button><span className="modal-actions-spacer"/><button className="ghost" onClick={close}>Fechar</button><button className="primary" disabled={busy} onClick={save}>{busy?"A guardar…":"Guardar alterações"}</button></div>
       </section>
       <aside className="detail-side">
@@ -293,7 +294,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <form className="part-add" onSubmit={addPart}><select value={partId} onChange={e=>setPartId(e.target.value)}><option value="">Adicionar peça…</option>{catalog.map(p=><option key={p.id} value={p.id}>{p.reference?`${p.reference} — `:""}{p.name}</option>)}</select><input type="number" min="1" step="1" value={qty} onChange={e=>setQty(e.target.value)}/><label className="tiny-check"><input type="checkbox" checked={used} onChange={e=>setUsed(e.target.checked)}/> usada</label><button className="primary" type="submit">+</button></form>
           <div className="parts-list">{parts.map(p=><div className="part-row" key={p.part_id}><span><strong>{p.parts?.name}</strong><small>{p.parts?.reference||"Sem referência"} • qtd. {p.quantity}</small></span><span><Status s={p.used?"completed":"pending"}/><button className="icon-btn small" onClick={()=>removePart(p.part_id)}><X size={13}/></button></span></div>)}{!parts.length&&<div className="muted small-text">Ainda não foram adicionadas peças.</div>}</div>
         </div>
-        <div className="detail-box"><h3>Histórico</h3>{history.map(h=><div className="history-row" key={h.id}><strong>{h.action==="status_change"?`${h.old_status||"—"} → ${h.new_status||"—"}`:h.action}</strong><small>{new Date(h.created_at).toLocaleString("pt-PT")}</small></div>)}{!history.length&&<div className="muted small-text">Sem alterações registadas.</div>}</div>
+        <div className="detail-box"><h3>Histórico de atividade</h3>{history.map(h=>{const labels={status_change:"Alterou estado",technician_change:"Alterou técnico",part_added:"Adicionou peça",part_removed:"Removeu peça",service_created:"Criou serviço",service_updated:"Atualizou serviço"};const action=labels[h.action]||h.action||"Atividade";const transition=h.action==="status_change"?`${h.old_status||"—"} → ${h.new_status||"—"}`:h.notes;return <div className="history-row" key={h.id}><div><strong>{action}</strong>{transition&&<span>{transition}</span>}</div><small>{new Date(h.created_at).toLocaleString("pt-PT")}</small></div>})}{!history.length&&<div className="muted small-text">Sem alterações registadas.</div>}</div>
       </aside>
     </div>
   </Modal>

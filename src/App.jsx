@@ -724,6 +724,8 @@ function Calendar({workspace,refresh}) {
     const original=new Date(service.scheduled_start); const next=new Date(`${iso(targetDate)}T${String(original.getHours()).padStart(2,"0")}:${String(original.getMinutes()).padStart(2,"0")}:00`);
     const duration=Math.max(30,(new Date(service.scheduled_end||service.scheduled_start)-new Date(service.scheduled_start))/60000||60);
     const end=new Date(next.getTime()+duration*60000);
+    const conflict=services.find(item=>item.id!==service.id&&String(item.technician_id)===String(targetTech)&&localDateKey(item.scheduled_start)===iso(targetDate)&&new Date(item.scheduled_start)<end&&new Date(item.scheduled_end||item.scheduled_start).getTime()>next.getTime());
+    if(conflict&&!window.confirm(`Conflito de horário com ${conflict.client_name||"outro serviço"}. Pretende continuar?`)){setMoving(false);return}
     const {error}=await supabase.from("services").update({technician_id:targetTech,scheduled_start:next.toISOString(),scheduled_end:end.toISOString()}).eq("id",service.id);
     setMoving(false); if(error) return alert(error.message); load();
   }

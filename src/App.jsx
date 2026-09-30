@@ -197,6 +197,8 @@ function Dashboard({workspace}) {
   const billed=allServices.filter(row=>row.invoiced).reduce((sum,row)=>sum+Number(row.amount||0),0);
   const completedValue=allServices.filter(row=>['completed','invoiced'].includes(row.board_status)).reduce((sum,row)=>sum+Number(row.amount||0),0);
   const averageValue=allServices.length?completedValue/allServices.length:0;
+  const technicianBreakdown=[...allServices.reduce((map,row)=>{const key=row.technician_name||"Por atribuir";map.set(key,(map.get(key)||0)+1);return map},new Map())].sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const clientBreakdown=[...allServices.reduce((map,row)=>{const key=row.client_name||"Sem cliente";map.set(key,(map.get(key)||0)+1);return map},new Map())].sort((a,b)=>b[1]-a[1]).slice(0,5);
   const money=value=>`€ ${Number(value||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}`;
   return <div>
   <Header title="Dashboard gestor" subtitle="A situação operacional da PACK4 em 10 segundos"
@@ -209,6 +211,7 @@ function Dashboard({workspace}) {
   </div>
   <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Hoje</span><h2>Operação do dia</h2></div><span className="section-caption">Atualizado em tempo real</span></div><div className="manager-metrics"><Metric label="Serviços hoje" value={today.length}/><Metric label="Técnicos ocupados" value={busyTechnicians}/><Metric label="Técnicos disponíveis" value={Math.max(0,(technicians.data||[]).length-busyTechnicians)}/><Metric label="Serviços atrasados" value={overdue} tone={overdue>0?"danger":"good"}/></div></section>
   <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Financeiro</span><h2>Visão financeira</h2></div></div><div className="manager-metrics financial"><Metric label="€ faturados" value={money(billed)}/><Metric label="€ em concluídos" value={money(completedValue)}/><Metric label="Valor médio / serviço" value={money(averageValue)}/></div></section>
+  <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Operação</span><h2>Distribuição de serviços</h2></div></div><div className="dashboard-breakdowns"><Breakdown title="Serviços por técnico" rows={technicianBreakdown}/><Breakdown title="Serviços por cliente" rows={clientBreakdown}/></div></section>
   <div className="grid-2">
       <section className="panel"><div className="panel-head"><h2>Serviços recentes</h2><NavLink to="/servicos">Ver todos <ChevronRight size={15}/></NavLink></div>
         {recent.loading ? <Loading/> : recent.error ? <ErrorBox e={recent.error}/> : <ServiceTable rows={recent.data}/>}
@@ -222,6 +225,7 @@ function Dashboard({workspace}) {
 
   function Kpi({icon:Icon,label,value}) { return <div className="kpi"><div className="kpi-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong></div></div> }
   function Metric({label,value,tone="default"}) { return <div className={`manager-metric ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
+  function Breakdown({title,rows}) { return <div className="breakdown"><h3>{title}</h3>{rows.length?rows.map(([label,count])=><div className="breakdown-row" key={label}><span>{label}</span><strong>{count}</strong></div>):<div className="muted small-text">Sem dados disponíveis.</div>}</div> }
   function Loading(){return <div className="loading">A carregar…</div>}
 function ErrorBox({e}){return <div className="alert danger">{e?.message || "Ocorreu um erro."}</div>}
 

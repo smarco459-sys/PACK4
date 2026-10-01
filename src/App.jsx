@@ -357,9 +357,9 @@ function OperationsMap({workspace, refresh}) {
         return {
           ...service,
           client_name: firstValue(service.client_name, client.name, client.company_name, "Cliente"),
-          address: firstValue(service.address, client.address, client.street, client.street_address, client.morada, client.rua),
-          postal_code: firstValue(service.postal_code, client.postcode, client.zip_code, client.zipcode, client.codigo_postal, client.codigoPostal),
-          city: firstValue(service.city, client.locality, client.municipality, client.cidade, client.concelho),
+          address: firstValue(service.address, service.street, service.street_address, service.morada, service.rua, client.address, client.street, client.street_address, client.morada, client.rua),
+          postal_code: firstValue(service.postal_code, service.postcode, service.zip_code, service.zipcode, service.codigo_postal, service.codigoPostal, client.postal_code, client.postcode, client.zip_code, client.zipcode, client.codigo_postal, client.codigoPostal),
+          city: firstValue(service.city, service.locality, service.municipality, service.cidade, service.concelho, client.city, client.locality, client.municipality, client.cidade, client.concelho),
           client_address: client,
         };
       }));
@@ -536,10 +536,10 @@ function OperationsMap({workspace, refresh}) {
     const query = search.trim();
     if (!query || !geocoderRef.current || !mapInstance.current) return;
     setSearching(true); setError("");
-    geocoderRef.current.geocode({ address: `${query}, Portugal`, region: "PT" }, (results, status) => {
+    geocoderRef.current.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => {
       setSearching(false);
       if (status === "OK" && results[0]) { mapInstance.current.setCenter(results[0].geometry.location); mapInstance.current.setZoom(16); }
-      else setError("Não foi possível encontrar essa morada ou código postal.");
+      else setError(`Não foi possível encontrar “${query}”. Tente morada, código postal e localidade.`);
     });
   }
 

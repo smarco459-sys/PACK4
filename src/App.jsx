@@ -3,7 +3,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
   BarChart3, Settings, LogOut, Plus, Search, RefreshCw, Euro, Clock3,
-  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin
+  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin, Navigation, Route as RouteIcon
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
@@ -180,21 +180,39 @@ function Dashboard({workspace}) {
     if(error) throw error; return data||[];
   },[workspace?.id]);
   const technicians=useData(async()=>{
-    if(!workspace?.id) return [];
-    const {data,error}=await supabase.from("technician_workload").select("*").eq("workspace_id",workspace.id).eq("active",true).order("open_services",{ascending:false});
-    if(error) throw error; return data||[];
+  if(!workspace?.id) return [];
+  const {data,error}=await supabase.from("technician_workload").select("*").eq("workspace_id",workspace.id).eq("active",true).order("open_services",{ascending:false});
+  if(error) throw error; return data||[];
   },[workspace?.id]);
-
+  const operational=useData(async()=>{
+  if(!workspace?.id) return {today:[],all:[]};
+  const {data,error}=await supabase.from("service_board").select("*").eq("workspace_id",workspace.id);
+  if(error) throw error;
+  const all=data||[], todayKey=localDateKey(new Date());
+  return {all,today:all.filter(row=>row.scheduled_start&&localDateKey(row.scheduled_start)===todayKey)};
+  },[workspace?.id]);
+  const today=operational.data?.today||[], allServices=operational.data?.all||[];
+  const overdue=allServices.filter(row=>row.scheduled_start&&new Date(row.scheduled_start)<new Date()&&!['completed','invoiced','cancelled'].includes(row.board_status)).length;
+  const busyTechnicians=new Set(today.filter(row=>row.technician_id).map(row=>String(row.technician_id))).size;
+  const billed=allServices.filter(row=>row.invoiced).reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const completedValue=allServices.filter(row=>['completed','invoiced'].includes(row.board_status)).reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const averageValue=allServices.length?completedValue/allServices.length:0;
+  const technicianBreakdown=[...allServices.reduce((map,row)=>{const key=row.technician_name||"Por atribuir";map.set(key,(map.get(key)||0)+1);return map},new Map())].sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const clientBreakdown=[...allServices.reduce((map,row)=>{const key=row.client_name||"Sem cliente";map.set(key,(map.get(key)||0)+1);return map},new Map())].sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const money=value=>`€ ${Number(value||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}`;
   return <div>
-    <Header title="Dashboard" subtitle="Acompanhe a operação técnica e tome decisões com dados em tempo real"
-      action={<button className="icon-btn" onClick={()=>location.reload()}><RefreshCw size={17}/></button>}/>
-    <div className="kpis">
-      <Kpi icon={Clock3} label="Pendentes" value={m.data?.pending_services ?? "—"}/>
-      <Kpi icon={CircleDot} label="Agendados" value={m.data?.scheduled_services ?? "—"}/>
-      <Kpi icon={CheckCircle2} label="Concluídos" value={m.data?.completed_services ?? "—"}/>
-      <Kpi icon={Euro} label="A faturar" value={m.data?.to_invoice_amount != null ? `€ ${Number(m.data.to_invoice_amount).toLocaleString("pt-PT",{minimumFractionDigits:2})}` : "—"}/>
-    </div>
-    <div className="grid-2">
+  <Header title="Dashboard gestor" subtitle="A situação operacional da PACK4 em 10 segundos"
+  action={<button className="icon-btn" onClick={()=>location.reload()}><RefreshCw size={17}/></button>}/>
+  <div className="kpis">
+  <Kpi icon={Clock3} label="Pendentes" value={m.data?.pending_services ?? "—"}/>
+  <Kpi icon={CircleDot} label="Agendados" value={m.data?.scheduled_services ?? "—"}/>
+  <Kpi icon={CheckCircle2} label="Concluídos" value={m.data?.completed_services ?? "—"}/>
+  <Kpi icon={Euro} label="A faturar" value={m.data?.to_invoice_amount != null ? money(m.data.to_invoice_amount) : "—"}/>
+  </div>
+  <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Hoje</span><h2>Operação do dia</h2></div><span className="section-caption">Atualizado em tempo real</span></div><div className="manager-metrics"><Metric label="Serviços hoje" value={today.length}/><Metric label="Técnicos ocupados" value={busyTechnicians}/><Metric label="Técnicos disponíveis" value={Math.max(0,(technicians.data||[]).length-busyTechnicians)}/><Metric label="Serviços atrasados" value={overdue} tone={overdue>0?"danger":"good"}/></div></section>
+  <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Financeiro</span><h2>Visão financeira</h2></div></div><div className="manager-metrics financial"><Metric label="€ faturados" value={money(billed)}/><Metric label="€ em concluídos" value={money(completedValue)}/><Metric label="Valor médio / serviço" value={money(averageValue)}/></div></section>
+  <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Operação</span><h2>Distribuição de serviços</h2></div></div><div className="dashboard-breakdowns"><Breakdown title="Serviços por técnico" rows={technicianBreakdown}/><Breakdown title="Serviços por cliente" rows={clientBreakdown}/></div></section>
+  <div className="grid-2">
       <section className="panel"><div className="panel-head"><h2>Serviços recentes</h2><NavLink to="/servicos">Ver todos <ChevronRight size={15}/></NavLink></div>
         {recent.loading ? <Loading/> : recent.error ? <ErrorBox e={recent.error}/> : <ServiceTable rows={recent.data}/>}
       </section>
@@ -205,8 +223,10 @@ function Dashboard({workspace}) {
   </div>;
 }
 
-function Kpi({icon:Icon,label,value}) { return <div className="kpi"><div className="kpi-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong></div></div> }
-function Loading(){return <div className="loading">A carregar…</div>}
+  function Kpi({icon:Icon,label,value}) { return <div className="kpi"><div className="kpi-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong></div></div> }
+  function Metric({label,value,tone="default"}) { return <div className={`manager-metric ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
+  function Breakdown({title,rows}) { return <div className="breakdown"><h3>{title}</h3>{rows.length?rows.map(([label,count])=><div className="breakdown-row" key={label}><span>{label}</span><strong>{count}</strong></div>):<div className="muted small-text">Sem dados disponíveis.</div>}</div> }
+  function Loading(){return <div className="loading">A carregar…</div>}
 function ErrorBox({e}){return <div className="alert danger">{e?.message || "Ocorreu um erro."}</div>}
 
 function ServiceTable({rows=[],onSelect}) {
@@ -267,8 +287,9 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <label>Valor<input type="number" step="0.01" value={data.amount??""} onChange={e=>setData({...data,amount:e.target.value})}/></label>
           <label className="check"><input type="checkbox" checked={!!data.invoiced} disabled={data.status!=="completed"} onChange={e=>setData({...data,invoiced:e.target.checked})}/> Faturado</label>
           <label>Referência fatura<input value={data.invoice_reference||""} onChange={e=>setData({...data,invoice_reference:e.target.value})}/></label>
-          <label className="span2">Notas<textarea value={data.notes||""} onChange={e=>setData({...data,notes:e.target.value})}/></label>
-        </div>
+  <label className="span2">Notas<textarea value={data.notes||""} onChange={e=>setData({...data,notes:e.target.value})}/></label>
+  <fieldset className="checklist-fieldset span2"><legend>Checklist técnica</legend><div className="service-checklist">{["Contacto com cliente","Diagnóstico","Peças necessárias","Peças disponíveis","Serviço realizado","Teste da máquina","Relatório enviado","Faturado"].map(item=><label key={item}><input type="checkbox" checked={String(data.notes||"").includes(`[${item}]`)} onChange={e=>{const marker=`[${item}]`;const notes=String(data.notes||"");setData({...data,notes:e.target.checked?(notes?`${notes}\n${marker}`:marker):notes.replace(marker," ").replace(/\n\s*\n/g,"\n")})}}/> {item}</label>)}</div></fieldset>
+  </div>
         <div className="modal-actions"><button className="danger-btn" type="button" onClick={removeService} disabled={busy}><Trash2 size={15}/> Eliminar serviço</button><span className="modal-actions-spacer"/><button className="ghost" onClick={close}>Fechar</button><button className="primary" disabled={busy} onClick={save}>{busy?"A guardar…":"Guardar alterações"}</button></div>
       </section>
       <aside className="detail-side">
@@ -277,7 +298,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <form className="part-add" onSubmit={addPart}><select value={partId} onChange={e=>setPartId(e.target.value)}><option value="">Adicionar peça…</option>{catalog.map(p=><option key={p.id} value={p.id}>{p.reference?`${p.reference} — `:""}{p.name}</option>)}</select><input type="number" min="1" step="1" value={qty} onChange={e=>setQty(e.target.value)}/><label className="tiny-check"><input type="checkbox" checked={used} onChange={e=>setUsed(e.target.checked)}/> usada</label><button className="primary" type="submit">+</button></form>
           <div className="parts-list">{parts.map(p=><div className="part-row" key={p.part_id}><span><strong>{p.parts?.name}</strong><small>{p.parts?.reference||"Sem referência"} • qtd. {p.quantity}</small></span><span><Status s={p.used?"completed":"pending"}/><button className="icon-btn small" onClick={()=>removePart(p.part_id)}><X size={13}/></button></span></div>)}{!parts.length&&<div className="muted small-text">Ainda não foram adicionadas peças.</div>}</div>
         </div>
-        <div className="detail-box"><h3>Histórico</h3>{history.map(h=><div className="history-row" key={h.id}><strong>{h.action==="status_change"?`${h.old_status||"—"} → ${h.new_status||"—"}`:h.action}</strong><small>{new Date(h.created_at).toLocaleString("pt-PT")}</small></div>)}{!history.length&&<div className="muted small-text">Sem alterações registadas.</div>}</div>
+        <div className="detail-box"><h3>Histórico de atividade</h3>{history.map(h=>{const labels={status_change:"Alterou estado",technician_change:"Alterou técnico",part_added:"Adicionou peça",part_removed:"Removeu peça",service_created:"Criou serviço",service_updated:"Atualizou serviço"};const action=labels[h.action]||h.action||"Atividade";const transition=h.action==="status_change"?`${h.old_status||"—"} → ${h.new_status||"—"}`:h.notes;return <div className="history-row" key={h.id}><div><strong>{action}</strong>{transition&&<span>{transition}</span>}</div><small>{new Date(h.created_at).toLocaleString("pt-PT")}</small></div>})}{!history.length&&<div className="muted small-text">Sem alterações registadas.</div>}</div>
       </aside>
     </div>
   </Modal>
@@ -295,6 +316,15 @@ function OperationsMap({workspace, refresh}) {
   const mapInstance = React.useRef(null);
   const geocoderRef = React.useRef(null);
   const markersRef = React.useRef([]);
+  const directionsRenderersRef = React.useRef([]);
+  const [routeBase, setRouteBase] = useState("PACK4 Soluções para indústria");
+  const [routeTechnician, setRouteTechnician] = useState("all");
+  const [routeDate, setRouteDate] = useState(new Date().toISOString().slice(0, 10));
+  const [routeBusy, setRouteBusy] = useState(false);
+  const [routeSaving, setRouteSaving] = useState(false);
+  const [routeMessage, setRouteMessage] = useState("");
+  const [plannedRoutes, setPlannedRoutes] = useState([]);
+  const [routeSummary, setRouteSummary] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -305,7 +335,7 @@ function OperationsMap({workspace, refresh}) {
         supabase.from("service_board").select("*").eq("workspace_id", workspace.id),
         // Do not depend on optional coordinate columns: the operational map geocodes
         // the address stored on the client record (address + postal code + city).
-        supabase.from("clients").select("id,name,address,postal_code,city").eq("workspace_id", workspace.id),
+        supabase.from("clients").select("*").eq("workspace_id", workspace.id),
       ]);
       if (cancelled) return;
       if (servicesResult.error) {
@@ -319,10 +349,20 @@ function OperationsMap({workspace, refresh}) {
         return;
       }
       const locations = new Map((clientsResult.data || []).map(client => [String(client.id), client]));
-      setServices((servicesResult.data || []).map(service => ({
-        ...service,
-        ...(locations.get(String(service.client_id)) || {}),
-      })));
+      setServices((servicesResult.data || []).map(service => {
+        const client = locations.get(String(service.client_id)) || {};
+        // Keep the service identity intact: spreading the client row here can replace
+        // the service id and makes markers/links point to the wrong record.
+        const firstValue = (...values) => values.find(value => value != null && String(value).trim() !== "") || "";
+        return {
+          ...service,
+          client_name: firstValue(service.client_name, client.name, client.company_name, "Cliente"),
+          address: firstValue(service.address, client.address, client.street, client.street_address, client.morada, client.rua),
+          postal_code: firstValue(service.postal_code, client.postcode, client.zip_code, client.zipcode, client.codigo_postal, client.codigoPostal),
+          city: firstValue(service.city, client.locality, client.municipality, client.cidade, client.concelho),
+          client_address: client,
+        };
+      }));
     }
     load();
     return () => { cancelled = true; };
@@ -347,23 +387,42 @@ function OperationsMap({workspace, refresh}) {
     geocoderRef.current = new window.google.maps.Geocoder();
     const colors = { pending: "#667085", scheduled: "#2d74da", in_progress: "#e08a18", completed: "#21a366", invoiced: "#7652c9", cancelled: "#c24141" };
     const clean = value => String(value || "").trim();
-    const addressOf = item => [clean(item.address), clean(item.postal_code), clean(item.city), "Portugal"].filter(Boolean).join(", ");
+    const addressPartsOf = item => [clean(item.address), clean(item.postal_code), clean(item.city)].filter(Boolean);
+    const addressOf = item => [...addressPartsOf(item), "Portugal"].filter(Boolean).join(", ");
+    const addressQueriesOf = item => {
+      const address = clean(item.address || item.street || item.street_address || item.morada || item.rua);
+      const postalCode = clean(item.postal_code || item.postcode || item.zip_code || item.zipcode || item.codigo_postal || item.codigoPostal).replace(/\s+/g, "");
+      const city = clean(item.city || item.locality || item.municipality || item.cidade || item.concelho);
+      const postalVariants = [...new Set([postalCode, postalCode.replace("-", " "), postalCode.replace("-", "")].filter(Boolean))];
+      const queries = [
+        ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [address, city, "Portugal"].filter(Boolean).join(", "),
+        ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [city, "Portugal"].filter(Boolean).join(", "),
+      ];
+      return [...new Set(queries.filter(query => query.length > "Portugal".length))];
+    };
     const escapeHtml = value => String(value || "").replace(/[&<>'"]/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[character]));
     async function resolvePosition(service) {
-      const address = addressOf(service);
-      if (address.length > "Portugal".length) {
-        if (geocodeCache.current.has(address)) return geocodeCache.current.get(address);
+      const queries = addressQueriesOf(service);
+      const cacheKey = queries.join(" | ");
+      if (geocodeCache.current.has(cacheKey)) return geocodeCache.current.get(cacheKey);
+      for (const address of queries) {
         const result = await new Promise(resolve => geocoderRef.current.geocode({
           address,
           region: "PT",
           componentRestrictions: { country: "PT" },
         }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
-        geocodeCache.current.set(address, result);
-        return result;
+        if (result) {
+          geocodeCache.current.set(cacheKey, result);
+          return result;
+        }
       }
-      // Coordinates are only a legacy fallback. New locations always use the client's address.
+      // Coordinates are only a legacy fallback when the client has no usable address.
       const lat = Number(service.latitude); const lng = Number(service.longitude);
-      return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+      const fallback = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+      geocodeCache.current.set(cacheKey, fallback);
+      return fallback;
     }
     async function renderMarkers() {
       markersRef.current.forEach(marker => marker.setMap(null));
@@ -386,6 +445,80 @@ function OperationsMap({workspace, refresh}) {
     return () => { cancelled = true; markersRef.current.forEach(marker => marker.setMap(null)); };
   }, [mapReady, services, filter]);
 
+  async function planRoutes() {
+    if (!mapInstance.current || !geocoderRef.current || !window.google?.maps) return;
+    setRouteBusy(true); setRouteMessage(""); setError(""); setPlannedRoutes([]); setRouteSummary(null);
+    directionsRenderersRef.current.forEach(renderer => renderer.setMap(null));
+    directionsRenderersRef.current = [];
+    const selectedBase = SERVICE_BASES.find(base => base.name === routeBase) || SERVICE_BASES[0];
+    const candidates = services.filter(service => {
+      const serviceDay = service.scheduled_start ? new Date(service.scheduled_start).toISOString().slice(0, 10) : "";
+      return service.technician_id && serviceDay === routeDate && (routeTechnician === "all" || String(service.technician_id) === String(routeTechnician)) && (service.address || service.postal_code || service.city);
+    });
+    const technicians = [...new Map(candidates.map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()];
+    if (!candidates.length) { setRouteMessage("Não existem serviços atribuídos para este técnico e dia com morada válida."); setRouteBusy(false); return; }
+    const clean = value => String(value || "").trim();
+    const addressOf = service => [service.address, service.postal_code, service.city, "Portugal"].map(clean).filter(Boolean).join(", ");
+    const geocode = async service => {
+      const queries = addressQueriesOf(service);
+      const key = queries.join(" | ");
+      if (geocodeCache.current.has(key)) return geocodeCache.current.get(key);
+      for (const query of queries) {
+        const position = await new Promise(resolve => geocoderRef.current.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
+        if (position) { geocodeCache.current.set(key, position); return position; }
+      }
+      geocodeCache.current.set(key, null);
+      return null;
+    };
+    const planned = [];
+    let unresolved = 0;
+    for (const technician of technicians) {
+      const technicianServices = candidates.filter(service => String(service.technician_id) === String(technician.id));
+      const resolvedPoints = await Promise.all(technicianServices.map(async service => ({ service, position: await geocode(service) })));
+      unresolved += resolvedPoints.filter(item => !item.position).length;
+      const points = resolvedPoints.filter(item => item.position);
+      if (!points.length) continue;
+      const renderer = new window.google.maps.DirectionsRenderer({ map: mapInstance.current, suppressMarkers: true, polylineOptions: { strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 } });
+      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: selectedBase, destination: selectedBase, waypoints: points.map(point => ({ location: point.position, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
+      if (!route) continue;
+      renderer.setDirections(route); directionsRenderersRef.current.push(renderer);
+      const legs = route.routes[0].legs || [];
+      const distanceMeters = legs.reduce((sum, leg) => sum + (leg.distance?.value || 0), 0);
+      const durationSeconds = legs.reduce((sum, leg) => sum + (leg.duration?.value || 0), 0);
+      const ordered = (route.routes[0].waypoint_order || points.map((_, index) => index)).map(index => points[index].service);
+      planned.push({ technician, services: ordered, distanceKm: distanceMeters / 1000, durationMinutes: durationSeconds / 60 });
+    }
+    setPlannedRoutes(planned);
+    const total = planned.reduce((sum, route) => sum + route.services.length, 0);
+    const distanceKm = planned.reduce((sum, route) => sum + route.distanceKm, 0);
+    const durationMinutes = planned.reduce((sum, route) => sum + route.durationMinutes, 0);
+    setRouteSummary({ total, distanceKm, durationMinutes });
+    setRouteMessage(`${total} serviço${total === 1 ? "" : "s"} planeado${total === 1 ? "" : "s"} para ${routeDate.split("-").reverse().join("/")}. ${unresolved ? `${unresolved} morada${unresolved === 1 ? "" : "s"} não foi${unresolved === 1 ? "" : "ram"} reconhecida${unresolved === 1 ? "" : "s"}; reveja a morada, código postal e localidade.` : "Todas as moradas foram reconhecidas."} A rota já está visível no mapa.`);
+    setRouteBusy(false);
+  }
+
+  async function authorizeRouteOrder() {
+    if (!plannedRoutes.length) return;
+    setRouteSaving(true); setRouteMessage("");
+    try {
+      for (const route of plannedRoutes) {
+        const original = route.services.slice().sort((a, b) => new Date(a.scheduled_start) - new Date(b.scheduled_start));
+        for (let index = 0; index < route.services.length; index += 1) {
+          const current = route.services[index];
+          const slot = original[index];
+          const duration = Math.max(30, (new Date(slot.scheduled_end || slot.scheduled_start).getTime() - new Date(slot.scheduled_start).getTime()) / 60000 || 60);
+          const start = new Date(slot.scheduled_start);
+          const end = new Date(start.getTime() + duration * 60000);
+          const { error: updateError } = await supabase.from("services").update({ scheduled_start: start.toISOString(), scheduled_end: end.toISOString() }).eq("id", current.id);
+          if (updateError) throw updateError;
+        }
+      }
+      setRouteMessage("Ordem autorizada e atualizada na agenda. A rota mantém-se visível no mapa.");
+    } catch (updateError) {
+      setError(`Não foi possível atualizar a agenda: ${updateError.message}`);
+    } finally { setRouteSaving(false); }
+  }
+
   async function searchLocation(event) {
     event.preventDefault();
     const query = search.trim();
@@ -404,7 +537,7 @@ function OperationsMap({workspace, refresh}) {
   const available = services.filter(service => service.address || service.postal_code || service.city || (Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)))).length;
   return <div><Header title="Mapa operacional" subtitle="Pesquise por morada ou código postal e veja os serviços por estado" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
     <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
-    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div>{error && <div className="map-message alert danger">{error}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div><div className="route-planner"><div className="route-planner-title"><RouteIcon size={18}/><div><strong>Planeador de rotas</strong><span>Seleciona o dia e otimiza a sequência de visitas por técnico</span></div></div><label>Dia da agenda<input type="date" value={routeDate} onChange={e => { setRouteDate(e.target.value); setPlannedRoutes([]); }}/></label><label>Base de partida<select value={routeBase} onChange={e => setRouteBase(e.target.value)}>{SERVICE_BASES.map(base => <option key={base.name} value={base.name}>{base.name}</option>)}</select></label><label>Técnico<select value={routeTechnician} onChange={e => setRouteTechnician(e.target.value)}><option value="all">Todos os técnicos</option>{[...new Map(services.filter(service => service.technician_id).map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()].map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label><button className="primary route-button" type="button" onClick={planRoutes} disabled={routeBusy}><Navigation size={16}/>{routeBusy ? "A calcular…" : "Planear rotas"}</button>{plannedRoutes.length > 0 && <button className="secondary route-button" type="button" onClick={authorizeRouteOrder} disabled={routeSaving}>{routeSaving ? "A atualizar agenda…" : "Autorizar ordem na agenda"}</button>}</div>{routeMessage && <div className="map-message alert success">{routeMessage}</div>}{routeSummary && <div className="route-summary"><Metric label="Serviços" value={routeSummary.total}/><Metric label="Distância total" value={`${routeSummary.distanceKm.toFixed(1)} km`}/><Metric label="Tempo estimado" value={`${Math.floor(routeSummary.durationMinutes/60)}h ${Math.round(routeSummary.durationMinutes%60)}m`}/><Metric label="Custo deslocação (0,75 €/km)" value={`€ ${(routeSummary.distanceKm*DISTANCE_RATE).toLocaleString("pt-PT",{minimumFractionDigits:2})}`}/></div>}{error && <div className="map-message alert danger">{error}</div>}{plannedRoutes.length > 0 && <div className="route-results">{plannedRoutes.map(route => <div className="route-result" key={route.technician.id}><strong>{route.technician.name}</strong><div className="route-result-meta"><span>{route.services.length} serviço{route.services.length===1?"":"s"}</span><span>{route.distanceKm.toFixed(1)} km</span><span>{Math.floor(route.durationMinutes/60)}h {Math.round(route.durationMinutes%60)}m</span><span>€ {(route.distanceKm*DISTANCE_RATE).toLocaleString("pt-PT",{minimumFractionDigits:2})}</span></div><ol>{route.services.map(service => <li key={service.id}>{service.client_name || "Cliente"}<span>{service.title}</span></li>)}</ol></div>)}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
     <p className="map-note">A localização é obtida automaticamente através da morada, código postal e cidade da ficha do cliente. As coordenadas guardadas são usadas apenas como alternativa quando não existe morada.</p>
   </div>;
 }
@@ -444,20 +577,21 @@ function Services({workspace, setRefresh}) {
 }
 
 function Kanban({workspace,setRefresh}) {
-  const [rows,setRows]=useState([]),[detail,setDetail]=useState(null),[q,setQ]=useState("");
+  const [rows,setRows]=useState([]),[detail,setDetail]=useState(null),[q,setQ]=useState(""),[priority,setPriority]=useState("all"),[technician,setTechnician]=useState("all"),[date,setDate]=useState("all");
   const cols=[['pending','PENDENTE'],['scheduled','AGENDADO'],['in_progress','EM CURSO'],['completed','CONCLUÍDO'],['invoiced','FATURADO']];
   async function load(){if(!workspace?.id)return;const {data,error}=await supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false});if(error)alert(error.message);else setRows(data||[])}
   useEffect(()=>{load()},[workspace?.id]);
-  useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel("services-live-kanban").on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
-  async function drop(target){const id=window.__dragServiceId;if(!id)return;const row=rows.find(x=>x.id===id);if(!row)return;const payload=target==="invoiced"?{status:"completed",invoiced:true}:{status:target,invoiced:false};const {error}=await supabase.from("services").update(payload).eq("id",id);if(error)alert(error.message);else{load();setRefresh?.(x=>x+1)}}
-  const visible=rows.filter(r=>((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase().includes(q.toLowerCase()));
-  return <div><Header title="Kanban" subtitle="Pipeline operacional: pendente → agendado → em curso → concluído → faturado"/><div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar no Kanban…" value={q} onChange={e=>setQ(e.target.value)}/></div></div><div className="kanban">{cols.map(([key,label])=>{const cards=visible.filter(r=>r.board_status===key);return <section className="kanban-col" key={key} onDragOver={e=>e.preventDefault()} onDrop={()=>drop(key)}><div className="kanban-head"><h2>{label}</h2><span>{cards.length}</span></div><div className="kanban-body">{cards.map(r=><article className="kanban-card" key={r.id} draggable onDragStart={()=>window.__dragServiceId=r.id} onClick={()=>setDetail(r)}><div className="card-top"><Status s={r.board_status}/><span className={`priority ${r.priority}`}>{({low:"Baixa",normal:"Normal",high:"Alta",urgent:"Urgente"})[r.priority]}</span></div><strong>{r.client_name||"Sem cliente"}</strong><p>{r.title}</p><small>{r.technician_name||"Por atribuir"}{r.scheduled_start?` • ${new Date(r.scheduled_start).toLocaleDateString("pt-PT")}`:""}</small>{r.billable&&<div className="card-value">€ {Number(r.amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</div>}</article>)}{!cards.length&&<div className="kanban-empty">Arraste serviços para aqui</div>}</div></section>})}</div>{detail&&<ServiceDetail service={detail} workspace={workspace} close={()=>setDetail(null)} setRefresh={setRefresh}/>}</div>
+  useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel(`services-live-kanban-${workspace.id}`).on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
+  async function drop(target){const id=window.__dragServiceId;if(!id)return;const row=rows.find(x=>x.id===id);if(!row||row.board_status===target)return;const allowed={pending:["scheduled","cancelled"],scheduled:["pending","in_progress","cancelled"],in_progress:["scheduled","completed"],completed:["invoiced","in_progress"],invoiced:[]};if(!allowed[row.board_status]?.includes(target)){alert(`Movimento inválido: ${row.board_status} → ${target}.`);return}if(target==="completed"&&!window.confirm("Confirmar que este serviço foi concluído?"))return;const payload=target==="invoiced"?{status:"completed",invoiced:true}:{status:target,invoiced:false};const {error}=await supabase.from("services").update(payload).eq("id",id);if(error)alert(error.message);else{load();setRefresh?.(x=>x+1)}}
+  const technicians=[...new Set(rows.map(r=>r.technician_name).filter(Boolean))];
+  const visible=rows.filter(r=>{const text=((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase();const matchesDate=date==="all"||(date==="today"&&r.scheduled_start&&localDateKey(r.scheduled_start)===localDateKey(new Date()));return text.includes(q.toLowerCase())&&(priority==="all"||r.priority===priority)&&(technician==="all"||r.technician_name===technician)&&matchesDate});
+  return <div><Header title="Kanban operacional" subtitle="Visão completa do fluxo técnico, com prioridades e controlo de estado"/><div className="toolbar kanban-filters"><div className="search"><Search size={17}/><input aria-label="Pesquisar no Kanban" placeholder="Cliente, serviço ou técnico…" value={q} onChange={e=>setQ(e.target.value)}/></div><select aria-label="Filtrar prioridade" value={priority} onChange={e=>setPriority(e.target.value)}><option value="all">Todas as prioridades</option><option value="urgent">Urgente</option><option value="high">Alta</option><option value="normal">Normal</option><option value="low">Baixa</option></select><select aria-label="Filtrar técnico" value={technician} onChange={e=>setTechnician(e.target.value)}><option value="all">Todos os técnicos</option>{technicians.map(name=><option key={name}>{name}</option>)}</select><select aria-label="Filtrar data" value={date} onChange={e=>setDate(e.target.value)}><option value="all">Todas as datas</option><option value="today">Hoje</option></select></div><div className="kanban">{cols.map(([key,label])=>{const cards=visible.filter(r=>r.board_status===key);return <section className="kanban-col" key={key} onDragOver={e=>e.preventDefault()} onDrop={()=>drop(key)}><div className="kanban-head"><h2>{label}</h2><span>{cards.length}</span></div><div className="kanban-body">{cards.map(r=><article className={`kanban-card ${r.scheduled_start&&new Date(r.scheduled_start)<new Date()&&!['completed','invoiced'].includes(r.board_status)?"is-late":""}`} key={r.id} draggable onDragStart={()=>window.__dragServiceId=r.id} onClick={()=>setDetail(r)}><div className="card-top"><Status s={r.board_status}/><span className={`priority ${r.priority}`}>{({low:"Baixa",normal:"Normal",high:"Alta",urgent:"Urgente"})[r.priority]}</span></div><strong>{r.client_name||"Sem cliente"}</strong><p>{r.title||"Serviço técnico"}</p><small>🔧 {r.technician_name||"Por atribuir"}</small><small>📅 {r.scheduled_start?new Date(r.scheduled_start).toLocaleString("pt-PT",{dateStyle:"short",timeStyle:"short"}):"Sem data"}</small>{r.machine&&<small>🏭 {r.machine}</small>}{r.billable&&<div className="card-value">€ {Number(r.amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</div>}<button className="card-open" type="button" onClick={e=>{e.stopPropagation();setDetail(r)}}>Abrir serviço</button></article>)}{!cards.length&&<div className="kanban-empty">Sem serviços neste filtro</div>}</div></section>})}</div>{detail&&<ServiceDetail service={detail} workspace={workspace} close={()=>setDetail(null)} setRefresh={setRefresh}/>}</div>
 }
 
 function Modal({title,close,children}){return <div className="modal-back"><div className="modal"><div className="modal-head"><h2>{title}</h2><button className="icon-btn" onClick={close}><X size={18}/></button></div>{children}</div></div>}
 
 function Clients({workspace,setRefresh}) {
-  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState(""),[editing,setEditing]=useState(null),[busy,setBusy]=useState(false);
+  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState(""),[editing,setEditing]=useState(null),[busy,setBusy]=useState(false),[profile,setProfile]=useState(null),[profileServices,setProfileServices]=useState([]);
   const emptyClient={name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""};
   const [form,setForm]=useState(emptyClient);
   async function load(){if(!workspace?.id)return; const {data}=await supabase.from("clients").select("*").eq("workspace_id",workspace.id).order("name");setRows(data||[])}
@@ -476,13 +610,14 @@ function Clients({workspace,setRefresh}) {
     if(error) return alert(error.message); load(); setRefresh?.(x=>x+1);
   }
   function editClient(client){setEditing(client);setForm({...emptyClient,...client});setOpen(true)}
+  async function openProfile(client){setProfile(client);const {data}=await supabase.from("service_board").select("*").eq("workspace_id",workspace.id).eq("client_id",client.id).order("scheduled_start",{ascending:false});setProfileServices(data||[])}
   const f=rows.filter(x=>(x.name+" "+(x.city||"")+" "+(x.phone||"")).toLowerCase().includes(q.toLowerCase()));
   function maps(c){const query=[c.address,c.postal_code,c.city].filter(Boolean).join(", ");return query?`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`:null}
   return <div><Header title="Clientes" subtitle="Clientes, contactos, moradas e localização" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo cliente</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente…" value={q} onChange={e=>setQ(e.target.value)}/></div></div>
-    <div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Telefone</th><th>Cidade</th><th>Morada</th><th>Mapa</th><th aria-label="Ações"></th></tr></thead><tbody>{f.map(c=><tr key={c.id}><td><strong>{c.name}</strong></td><td>{c.contact_name||"—"}</td><td>{c.phone||"—"}</td><td>{c.city||"—"}</td><td>{c.address||"—"}</td><td>{maps(c)?<a className="table-link" href={maps(c)} target="_blank" rel="noreferrer">Abrir mapa</a>:"—"}</td><td><div className="row-actions"><button className="icon-btn small" aria-label={`Editar ${c.name}`} onClick={()=>editClient(c)}><Pencil size={14}/></button><button className="icon-btn small danger-icon" aria-label={`Eliminar ${c.name}`} onClick={()=>removeClient(c)} disabled={busy}><Trash2 size={14}/></button></div></td></tr>)}{!f.length&&<tr><td colSpan="7" className="empty">Sem clientes.</td></tr>}</tbody></table></div></div>
+    <div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Telefone</th><th>Cidade</th><th>Morada</th><th>Mapa</th><th aria-label="Ações"></th></tr></thead><tbody>{f.map(c=><tr key={c.id} onClick={()=>openProfile(c)} className="click-row"><td><strong>{c.name}</strong></td><td>{c.contact_name||"—"}</td><td>{c.phone||"—"}</td><td>{c.city||"—"}</td><td>{c.address||"—"}</td><td>{maps(c)?<a className="table-link" href={maps(c)} target="_blank" rel="noreferrer">Abrir mapa</a>:"—"}</td><td><div className="row-actions"><button className="icon-btn small" aria-label={`Editar ${c.name}`} onClick={()=>editClient(c)}><Pencil size={14}/></button><button className="icon-btn small danger-icon" aria-label={`Eliminar ${c.name}`} onClick={()=>removeClient(c)} disabled={busy}><Trash2 size={14}/></button></div></td></tr>)}{!f.length&&<tr><td colSpan="7" className="empty">Sem clientes.</td></tr>}</tbody></table></div></div>
     {open&&<Modal title={editing?"Editar cliente":"Novo cliente"} close={()=>{setOpen(false);setEditing(null);setForm(emptyClient)}}><form onSubmit={save} className="form-grid client-form"><div className="form-section-heading span2"><span className="form-section-icon"><Users size={16}/></span><div><strong>Dados do cliente</strong><small>Identificação e contactos principais</small></div></div>{["name","contact_name","phone","email","address","postal_code","city"].map(k=><label key={k}>{({name:"Nome completo",contact_name:"Pessoa de contacto",phone:"Telefone",email:"Email",address:"Morada",postal_code:"Código postal",city:"Cidade"})[k]}<input required={k==="name"} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}<label className="span2">Notas internas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":editing?"Guardar alterações":"Criar cliente"}</button></div></form></Modal>}
-  </div>
+  {profile&&<Modal title={profile.name} close={()=>setProfile(null)}><div className="client-profile"><div className="client-profile-grid"><div><span>Serviços em aberto</span><strong>{profileServices.filter(item=>!['completed','invoiced','cancelled'].includes(item.board_status)).length}</strong></div><div><span>Total de serviços</span><strong>{profileServices.length}</strong></div><div><span>Contacto</span><strong>{profile.contact_name||"—"}</strong></div><div><span>Telefone</span><strong>{profile.phone||"—"}</strong></div><div><span>Email</span><strong>{profile.email||"—"}</strong></div><div><span>Morada</span><strong>{[profile.address,profile.postal_code,profile.city].filter(Boolean).join(", ")||"—"}</strong></div></div><h3>Histórico de assistência</h3><ServiceTable rows={profileServices} onSelect={()=>{}}/></div></Modal>}</div>
 }
 
 function Technicians({workspace}) {
@@ -509,7 +644,7 @@ function Technicians({workspace}) {
   async function save(e){e.preventDefault();setBusy(true);const {error}=await supabase.from("technicians").update(form).eq("id",editing.id);setBusy(false);if(error)return alert(error.message);setEditing(null);d.reload();}
   async function remove(t){if(!window.confirm(`Eliminar o técnico “${t.name}”?`))return;setBusy(true);const {error}=await supabase.from("technicians").delete().eq("id",t.id);setBusy(false);if(error)return alert(error.message);d.reload();}
   useEffect(()=>{if(!workspace?.id)return;const channel=supabase.channel(`technicians-live-${workspace.id}`).on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},d.reload).on("postgres_changes",{event:"*",schema:"public",table:"technicians",filter:`workspace_id=eq.${workspace.id}`},d.reload).subscribe();return()=>supabase.removeChannel(channel)},[workspace?.id]);
-  return <div><Header title="Técnicos" subtitle="Carga semanal, disponibilidade e serviços em aberto"/><div className="cards-grid">{d.data?.map(t=><div className="panel tech-card" key={t.technician_id}><div className="tech-title"><div className="avatar big">{t.name.slice(0,1)}</div><div><h2>{t.name}</h2><span className={`status ${t.active?'green':'gray'}`}>{t.active?'Ativo':'Inativo'}</span></div><div className="row-actions"><button className="icon-btn" title="Editar técnico" onClick={()=>startEdit(t)}><Pencil size={15}/></button><button className="icon-btn danger-icon" title="Eliminar técnico" onClick={()=>remove(t)}><Trash2 size={15}/></button></div></div><div className="statline"><span>Em curso</span><strong>{t.active_services}</strong></div><div className="statline"><span>Hoje</span><strong>{t.today_services}</strong></div><div className="statline"><span>Semana de trabalho</span><strong>{t.week_services}</strong></div><div className="statline"><span>Em aberto</span><strong>{t.open_services}</strong></div></div>)}{!d.data?.length&&!d.loading&&<div className="panel empty">Ainda não existem técnicos associados ao workspace.</div>}</div>{editing&&<Modal title="Editar técnico" close={()=>setEditing(null)}><form onSubmit={save} className="form-grid"><label>Nome<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Email<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Telefone<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label><label>Estado<select value={form.active?"true":"false"} onChange={e=>setForm({...form,active:e.target.value==="true"})}><option value="true">Ativo</option><option value="false">Inativo</option></select></label><div className="modal-actions"><button type="button" className="secondary" onClick={()=>setEditing(null)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":"Guardar alterações"}</button></div></form></Modal>}</div>
+  return <div><Header title="Técnicos" subtitle="Carga semanal, disponibilidade e serviços em aberto"/><div className="cards-grid">{d.data?.map(t=><div className="panel tech-card" key={t.technician_id}><div className="tech-title"><div className="avatar big">{t.name.slice(0,1)}</div><div><h2>{t.name}</h2><span className={`status ${!t.active?'red':t.active_services>0?'orange':'green'}`}>{!t.active?'Indisponível':t.active_services>0?'Ocupado':'Disponível'}</span></div><div className="row-actions"><button className="icon-btn" title="Editar técnico" onClick={()=>startEdit(t)}><Pencil size={15}/></button><button className="icon-btn danger-icon" title="Eliminar técnico" onClick={()=>remove(t)}><Trash2 size={15}/></button></div></div><div className="statline"><span>Em curso</span><strong>{t.active_services}</strong></div><div className="statline"><span>Hoje</span><strong>{t.today_services}</strong></div><div className="tech-load-bar"><i style={{width:`${Math.min(100,(t.week_services||0)*8)}%`}}/></div><div className="statline"><span>Semana de trabalho</span><strong>{t.week_services}</strong></div><div className="statline"><span>Em aberto</span><strong>{t.open_services}</strong></div><div className="tech-contact">{t.email||"Sem email"} · {t.phone||"Sem telefone"}</div></div>)}{!d.data?.length&&!d.loading&&<div className="panel empty">Ainda não existem técnicos associados ao workspace.</div>}</div>{editing&&<Modal title="Editar técnico" close={()=>setEditing(null)}><form onSubmit={save} className="form-grid"><label>Nome<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Email<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label>Telefone<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label><label>Estado<select value={form.active?"true":"false"} onChange={e=>setForm({...form,active:e.target.value==="true"})}><option value="true">Ativo</option><option value="false">Inativo</option></select></label><div className="modal-actions"><button type="button" className="secondary" onClick={()=>setEditing(null)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":"Guardar alterações"}</button></div></form></Modal>}</div>
 }
 
 function todayStart(){const d=new Date();d.setHours(0,0,0,0);return d}
@@ -558,12 +693,14 @@ function isoWeek(date){const d=new Date(Date.UTC(date.getFullYear(),date.getMont
 
 function Parts({workspace}) {
   const d=useData(async()=>{if(!workspace?.id)return[];const {data,error}=await supabase.from("part_usage_summary").select("*").eq("workspace_id",workspace.id).order("name");if(error)throw error;return data||[]},[workspace?.id]);
-  return <div><Header title="Peças" subtitle="Stock, referências e utilização em serviços"/><div className="panel"><div className="table-wrap"><table><thead><tr><th>Referência</th><th>Peça</th><th>Stock</th><th>Custo</th><th>Utilizada</th><th>Serviços</th></tr></thead><tbody>{d.data?.map(p=><tr key={p.part_id}><td>{p.reference||"—"}</td><td><strong>{p.name}</strong></td><td>{p.stock_quantity}</td><td>€ {Number(p.unit_cost||0).toFixed(2)}</td><td>{p.quantity_used||0}</td><td>{p.service_count||0}</td></tr>)}</tbody></table></div></div></div>
+  const lowStock=(d.data||[]).filter(p=>Number(p.stock_quantity||0)<=Number(p.minimum_stock??p.min_stock??5));
+  const totalValue=(d.data||[]).reduce((sum,p)=>sum+Number(p.stock_quantity||0)*Number(p.unit_cost||0),0);
+  return <div><Header title="Peças e stock" subtitle="Disponibilidade, utilização e alertas de reposição"/><div className="parts-summary"><Metric label="Referências" value={d.data?.length||0}/><Metric label="Stock baixo" value={lowStock.length} tone={lowStock.length?"danger":"good"}/><Metric label="Valor em stock" value={`€ ${totalValue.toLocaleString("pt-PT",{minimumFractionDigits:2})}`}/></div><div className="panel"><div className="table-wrap"><table><thead><tr><th>Referência</th><th>Peça</th><th>Stock atual</th><th>Mínimo</th><th>Estado</th><th>Custo</th><th>Utilizada</th><th>Serviços</th></tr></thead><tbody>{d.data?.map(p=>{const minimum=Number(p.minimum_stock??p.min_stock??5),stock=Number(p.stock_quantity||0),low=stock<=minimum;return <tr key={p.part_id} className={low?"stock-low":""}><td>{p.reference||"—"}</td><td><strong>{p.name}</strong></td><td>{stock}</td><td>{minimum}</td><td><span className={`status ${low?"red":"green"}`}>{low?"Repor":"Disponível"}</span></td><td>€ {Number(p.unit_cost||0).toFixed(2)}</td><td>{p.quantity_used||0}</td><td>{p.service_count||0}</td></tr>})}</tbody></table></div></div></div>
 }
 
 function Calendar({workspace,refresh}) {
   const [weekStart,setWeekStart]=useState(()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);return d});
-  const [services,setServices]=useState([]),[techs,setTechs]=useState([]),[availability,setAvailability]=useState([]),[loading,setLoading]=useState(true);
+  const [services,setServices]=useState([]),[techs,setTechs]=useState([]),[availability,setAvailability]=useState([]),[loading,setLoading]=useState(true),[filterTech,setFilterTech]=useState("all"),[moving,setMoving]=useState(false);
   const days=useMemo(()=>Array.from({length:5},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d}),[weekStart]);
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const weekLabel=`Semana ${isoWeek(weekStart)} · ${weekStart.toLocaleDateString("pt-PT",{day:"2-digit",month:"short"})} – ${days[days.length-1]?.toLocaleDateString("pt-PT",{day:"2-digit",month:"short",year:"numeric"})}`;
@@ -587,12 +724,23 @@ function Calendar({workspace,refresh}) {
   useEffect(()=>{load()},[workspace?.id,weekStart.toISOString(),refresh]);
   function servicesFor(techId,date){return services.filter(x=>String(x.technician_id)===String(techId)&&localDateKey(x.scheduled_start)===iso(date))}
   function unavailable(techId,date){const a=availability.find(x=>String(x.technician_id)===String(techId)&&String(x.availability_date).slice(0,10)===iso(date));return a?.start_time==null&&a?.end_time==null?a:null}
+  async function moveService(service, targetTech, targetDate){
+    if(!service||unavailable(targetTech,targetDate)) return alert("Este técnico está indisponível nesse dia.");
+    setMoving(true);
+    const original=new Date(service.scheduled_start); const next=new Date(`${iso(targetDate)}T${String(original.getHours()).padStart(2,"0")}:${String(original.getMinutes()).padStart(2,"0")}:00`);
+    const duration=Math.max(30,(new Date(service.scheduled_end||service.scheduled_start)-new Date(service.scheduled_start))/60000||60);
+    const end=new Date(next.getTime()+duration*60000);
+    const conflict=services.find(item=>item.id!==service.id&&String(item.technician_id)===String(targetTech)&&localDateKey(item.scheduled_start)===iso(targetDate)&&new Date(item.scheduled_start)<end&&new Date(item.scheduled_end||item.scheduled_start).getTime()>next.getTime());
+    if(conflict&&!window.confirm(`Conflito de horário com ${conflict.client_name||"outro serviço"}. Pretende continuar?`)){setMoving(false);return}
+    const {error}=await supabase.from("services").update({technician_id:targetTech,scheduled_start:next.toISOString(),scheduled_end:end.toISOString()}).eq("id",service.id);
+    setMoving(false); if(error) return alert(error.message); load();
+  }
   return <div><Header title="Calendário" subtitle="Planeamento semanal por técnico e disponibilidade" action={<div className="calendar-nav"><button className="ghost" aria-label="Semana anterior" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()-7))}>‹ <span>Anterior</span></button><button className="today-btn" onClick={()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);setWeekStart(d)}}>Hoje</button><button className="ghost" aria-label="Próxima semana" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+7))}><span>Próxima</span> ›</button></div>}/> 
-    <div className="calendar-toolbar"><div><span className="eyebrow">Planeamento</span><strong>{weekLabel}</strong></div><span className="calendar-count">{services.length} {services.length===1?"serviço agendado":"serviços agendados"}</span></div>
+    <div className="calendar-toolbar"><div><span className="eyebrow">Planeamento</span><strong>{weekLabel}</strong></div><div className="calendar-controls"><label>Técnico<select value={filterTech} onChange={e=>setFilterTech(e.target.value)}><option value="all">Todos os técnicos</option>{techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><span className="calendar-count">{services.length} {services.length===1?"serviço agendado":"serviços agendados"}</span></div></div>
     <div className="calendar-legend"><span><i className="legend-dot booked"/> Serviço marcado</span><span><i className="legend-dot unavailable"/> Técnico indisponível</span><span><i className="legend-euro">€</i> A faturar</span></div>
     <div className="panel calendar-board">
-      <div className="calendar-grid-header"><div className="day-label-cell">Data</div>{techs.map(t=><div key={t.id} className="tech-head"><span className="tech-avatar">{t.name.slice(0,1).toUpperCase()}</span><strong>{t.name}</strong></div>)}</div>
-      {loading?<Loading/>:days.map(d=><div className="calendar-grid-row" key={iso(d)}><div className={`day-head ${iso(d)===iso(new Date())?"today":""}`}><strong>{d.toLocaleDateString("pt-PT",{weekday:"short"})}</strong><span>{d.getDate().toString().padStart(2,"0")}/{(d.getMonth()+1).toString().padStart(2,"0")}</span></div>{techs.map(t=>{const items=servicesFor(t.id,d),off=unavailable(t.id,d);return <div key={t.id} className={`day-cell ${off?"day-off":""}`} title={off?.reason||""}>{off?<div className="off-label">INDISPONÍVEL{off.reason?` • ${off.reason}`:""}</div>:items.map(x=><div className="cal-card" key={x.id}><strong>{x.client_name}</strong><span>{x.scheduled_start?new Date(x.scheduled_start).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}):"—"} · {x.title}</span>{x.billable&&<b>€ {Number(x.amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</b>}</div>)}{!off&&!items.length&&<span className="empty-slot">—</span>}</div>})}</div>)}
+      <div className="calendar-grid-header"><div className="day-label-cell">Data</div>{techs.filter(t=>filterTech==="all"||String(t.id)===String(filterTech)).map(t=><div key={t.id} className="tech-head"><span className="tech-avatar">{t.name.slice(0,1).toUpperCase()}</span><strong>{t.name}</strong></div>)}</div>
+      {loading?<Loading/>:days.map(d=><div className="calendar-grid-row" key={iso(d)}><div className={`day-head ${iso(d)===iso(new Date())?"today":""}`}><strong>{d.toLocaleDateString("pt-PT",{weekday:"short"})}</strong><span>{d.getDate().toString().padStart(2,"0")}/{(d.getMonth()+1).toString().padStart(2,"0")}</span></div>{techs.filter(t=>filterTech==="all"||String(t.id)===String(filterTech)).map(t=>{const items=servicesFor(t.id,d),off=unavailable(t.id,d);return <div key={t.id} className={`day-cell ${off?"day-off":""}`} title={off?.reason||""} onDragOver={e=>e.preventDefault()} onDrop={()=>moveService(window.__calendarDragService,t.id,d)}>{off?<div className="off-label">INDISPONÍVEL{off.reason?` • ${off.reason}`:""}</div>:items.map(x=><div className="cal-card" key={x.id} draggable onDragStart={()=>{window.__calendarDragService=x}} onClick={()=>window.dispatchEvent(new CustomEvent("open-service",{detail:x}))}><strong>{x.client_name}</strong><span>{x.scheduled_start?new Date(x.scheduled_start).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}):"—"} · {x.title}</span>{x.billable&&<b>€ {Number(x.amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</b>}</div>)}{!off&&!items.length&&<span className="empty-slot">—</span>}</div>})}</div>)}
     </div>
   </div>
 }

@@ -60,8 +60,8 @@ function Login() {
       <h1>Entrar</h1>
       <p className="muted">Acesso ao departamento técnico</p>
       <form onSubmit={submit}>
-        <label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required /></label>
-        <label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required /></label>
+        <label>Email<input name="email" type="email" autoComplete="email" inputMode="email" value={email} onChange={e=>setEmail(e.target.value)} required /></label>
+        <label>Password<input name="password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required /></label>
         {error && <div className="alert danger">{error}</div>}
         {sent && <div className="alert success">Email de recuperação enviado.</div>}
         <button className="primary wide" disabled={busy}>{busy ? "A entrar..." : "Entrar"}</button>

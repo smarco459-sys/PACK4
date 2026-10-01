@@ -390,9 +390,10 @@ function OperationsMap({workspace, refresh}) {
     const addressPartsOf = item => [clean(item.address), clean(item.postal_code), clean(item.city)].filter(Boolean);
     const addressOf = item => [...addressPartsOf(item), "Portugal"].filter(Boolean).join(", ");
     const addressQueriesOf = item => {
-      const address = clean(item.address || item.street || item.street_address || item.morada || item.rua);
-      const postalCode = clean(item.postal_code || item.postcode || item.zip_code || item.zipcode || item.codigo_postal || item.codigoPostal).replace(/\s+/g, "");
-      const city = clean(item.city || item.locality || item.municipality || item.cidade || item.concelho);
+      const client = item.client_address || item.client || {};
+      const address = clean(item.address || item.street || item.street_address || item.morada || item.rua || client.address || client.street || client.street_address || client.morada || client.rua);
+      const postalCode = clean(item.postal_code || item.postcode || item.zip_code || item.zipcode || item.codigo_postal || item.codigoPostal || client.postal_code || client.postcode || client.zip_code || client.zipcode || client.codigo_postal || client.codigoPostal).replace(/\s+/g, "");
+      const city = clean(item.city || item.locality || item.municipality || item.cidade || item.concelho || client.city || client.locality || client.municipality || client.cidade || client.concelho);
       const postalVariants = [...new Set([postalCode, postalCode.replace("-", " "), postalCode.replace("-", "")].filter(Boolean))];
       const queries = [
         ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
@@ -453,7 +454,7 @@ function OperationsMap({workspace, refresh}) {
     const selectedBase = SERVICE_BASES.find(base => base.name === routeBase) || SERVICE_BASES[0];
     const candidates = services.filter(service => {
       const serviceDay = service.scheduled_start ? new Date(service.scheduled_start).toISOString().slice(0, 10) : "";
-      return service.technician_id && serviceDay === routeDate && (routeTechnician === "all" || String(service.technician_id) === String(routeTechnician)) && (service.address || service.postal_code || service.city);
+      return service.technician_id && serviceDay === routeDate && (routeTechnician === "all" || String(service.technician_id) === String(routeTechnician)) && (service.address || service.postal_code || service.city || service.client_address?.address || service.client_address?.postal_code || service.client_address?.city);
     });
     const technicians = [...new Map(candidates.map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()];
     if (!candidates.length) { setRouteMessage("Não existem serviços atribuídos para este técnico e dia com morada válida."); setRouteBusy(false); return; }
@@ -477,21 +478,22 @@ function OperationsMap({workspace, refresh}) {
       if (geocodeCache.current.has(key)) return geocodeCache.current.get(key);
       for (const query of queries) {
         const position = await new Promise(resolve => geocoderRef.current.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
-        if (position) { geocodeCache.current.set(key, position); return position; }
+        if (position) { const resolved = { position, address: query }; geocodeCache.current.set(key, resolved); return resolved; }
       }
-      geocodeCache.current.set(key, null);
-      return null;
+      const fallback = { position: null, address: queries[0] || "" };
+      geocodeCache.current.set(key, fallback);
+      return fallback;
     };
     const planned = [];
     let unresolved = 0;
     for (const technician of technicians) {
       const technicianServices = candidates.filter(service => String(service.technician_id) === String(technician.id));
       const resolvedPoints = await Promise.all(technicianServices.map(async service => ({ service, position: await geocode(service) })));
-      unresolved += resolvedPoints.filter(item => !item.position).length;
-      const points = resolvedPoints.filter(item => item.position);
+      unresolved += resolvedPoints.filter(item => !item.position?.position && !item.position?.address).length;
+      const points = resolvedPoints.filter(item => item.position?.position || item.position?.address);
       if (!points.length) continue;
       const renderer = new window.google.maps.DirectionsRenderer({ map: mapInstance.current, suppressMarkers: true, polylineOptions: { strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 } });
-      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: selectedBase, destination: selectedBase, waypoints: points.map(point => ({ location: point.position, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
+      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: selectedBase, destination: selectedBase, waypoints: points.map(point => ({ location: point.position.position || point.position.address, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
       if (!route) continue;
       renderer.setDirections(route); directionsRenderersRef.current.push(renderer);
       const legs = route.routes[0].legs || [];

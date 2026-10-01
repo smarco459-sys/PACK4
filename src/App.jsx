@@ -458,7 +458,19 @@ function OperationsMap({workspace, refresh}) {
     const technicians = [...new Map(candidates.map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()];
     if (!candidates.length) { setRouteMessage("Não existem serviços atribuídos para este técnico e dia com morada válida."); setRouteBusy(false); return; }
     const clean = value => String(value || "").trim();
-    const addressOf = service => [service.address, service.postal_code, service.city, "Portugal"].map(clean).filter(Boolean).join(", ");
+    const addressQueriesOf = service => {
+      const address = clean(service.address || service.street || service.street_address || service.morada || service.rua);
+      const postalCode = clean(service.postal_code || service.postcode || service.zip_code || service.zipcode || service.codigo_postal || service.codigoPostal).replace(/\s+/g, "");
+      const city = clean(service.city || service.locality || service.municipality || service.cidade || service.concelho);
+      const postalVariants = [...new Set([postalCode, postalCode.replace("-", " "), postalCode.replace("-", "")].filter(Boolean))];
+      return [...new Set([
+        ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [address, city, "Portugal"].filter(Boolean).join(", "),
+        ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [city, "Portugal"].filter(Boolean).join(", "),
+      ].filter(query => query.length > "Portugal".length))];
+    };
+    const addressOf = service => addressQueriesOf(service)[0] || "";
     const geocode = async service => {
       const queries = addressQueriesOf(service);
       const key = queries.join(" | ");

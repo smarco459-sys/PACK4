@@ -357,9 +357,9 @@ function OperationsMap({workspace, refresh}) {
         return {
           ...service,
           client_name: firstValue(service.client_name, client.name, client.company_name, "Cliente"),
-          address: firstValue(service.address, client.address, client.street, client.street_address, client.morada, client.rua),
-          postal_code: firstValue(service.postal_code, client.postcode, client.zip_code, client.zipcode, client.codigo_postal, client.codigoPostal),
-          city: firstValue(service.city, client.locality, client.municipality, client.cidade, client.concelho),
+          address: firstValue(service.address, service.street, service.street_address, service.morada, service.rua, client.address, client.street, client.street_address, client.morada, client.rua),
+          postal_code: firstValue(service.postal_code, service.postcode, service.zip_code, service.zipcode, service.codigo_postal, service.codigoPostal, client.postal_code, client.postcode, client.zip_code, client.zipcode, client.codigo_postal, client.codigoPostal),
+          city: firstValue(service.city, service.locality, service.municipality, service.cidade, service.concelho, client.city, client.locality, client.municipality, client.cidade, client.concelho),
           client_address: client,
         };
       }));
@@ -390,9 +390,10 @@ function OperationsMap({workspace, refresh}) {
     const addressPartsOf = item => [clean(item.address), clean(item.postal_code), clean(item.city)].filter(Boolean);
     const addressOf = item => [...addressPartsOf(item), "Portugal"].filter(Boolean).join(", ");
     const addressQueriesOf = item => {
-      const address = clean(item.address);
-      const postalCode = clean(item.postal_code).replace(/\s+/g, "");
-      const city = clean(item.city);
+      const client = item.client_address || item.client || {};
+      const address = clean(item.address || item.street || item.street_address || item.morada || item.rua || client.address || client.street || client.street_address || client.morada || client.rua);
+      const postalCode = clean(item.postal_code || item.postcode || item.zip_code || item.zipcode || item.codigo_postal || item.codigoPostal || client.postal_code || client.postcode || client.zip_code || client.zipcode || client.codigo_postal || client.codigoPostal).replace(/\s+/g, "");
+      const city = clean(item.city || item.locality || item.municipality || item.cidade || item.concelho || client.city || client.locality || client.municipality || client.cidade || client.concelho);
       const postalVariants = [...new Set([postalCode, postalCode.replace("-", " "), postalCode.replace("-", "")].filter(Boolean))];
       const queries = [
         ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
@@ -453,27 +454,46 @@ function OperationsMap({workspace, refresh}) {
     const selectedBase = SERVICE_BASES.find(base => base.name === routeBase) || SERVICE_BASES[0];
     const candidates = services.filter(service => {
       const serviceDay = service.scheduled_start ? new Date(service.scheduled_start).toISOString().slice(0, 10) : "";
-      return service.technician_id && serviceDay === routeDate && (routeTechnician === "all" || String(service.technician_id) === String(routeTechnician)) && (service.address || service.postal_code || service.city);
+      return service.technician_id && serviceDay === routeDate && (routeTechnician === "all" || String(service.technician_id) === String(routeTechnician)) && (service.address || service.postal_code || service.city || service.client_address?.address || service.client_address?.postal_code || service.client_address?.city);
     });
     const technicians = [...new Map(candidates.map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()];
     if (!candidates.length) { setRouteMessage("Não existem serviços atribuídos para este técnico e dia com morada válida."); setRouteBusy(false); return; }
     const clean = value => String(value || "").trim();
-    const addressOf = service => [service.address, service.postal_code, service.city, "Portugal"].map(clean).filter(Boolean).join(", ");
-    const geocode = service => new Promise(resolve => {
-      const key = addressOf(service);
-      if (geocodeCache.current.has(key)) return resolve(geocodeCache.current.get(key));
-      geocoderRef.current.geocode({ address: key, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => {
-        const position = status === "OK" && results[0] ? results[0].geometry.location : null;
-        geocodeCache.current.set(key, position); resolve(position);
-      });
-    });
+    const addressQueriesOf = service => {
+      const address = clean(service.address || service.street || service.street_address || service.morada || service.rua);
+      const postalCode = clean(service.postal_code || service.postcode || service.zip_code || service.zipcode || service.codigo_postal || service.codigoPostal).replace(/\s+/g, "");
+      const city = clean(service.city || service.locality || service.municipality || service.cidade || service.concelho);
+      const postalVariants = [...new Set([postalCode, postalCode.replace("-", " "), postalCode.replace("-", "")].filter(Boolean))];
+      return [...new Set([
+        ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [address, city, "Portugal"].filter(Boolean).join(", "),
+        ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
+        [city, "Portugal"].filter(Boolean).join(", "),
+      ].filter(query => query.length > "Portugal".length))];
+    };
+    const addressOf = service => addressQueriesOf(service)[0] || "";
+    const geocode = async service => {
+      const queries = addressQueriesOf(service);
+      const key = queries.join(" | ");
+      if (geocodeCache.current.has(key)) return geocodeCache.current.get(key);
+      for (const query of queries) {
+        const position = await new Promise(resolve => geocoderRef.current.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
+        if (position) { const resolved = { position, address: query }; geocodeCache.current.set(key, resolved); return resolved; }
+      }
+      const fallback = { position: null, address: queries[0] || "" };
+      geocodeCache.current.set(key, fallback);
+      return fallback;
+    };
     const planned = [];
+    let unresolved = 0;
     for (const technician of technicians) {
       const technicianServices = candidates.filter(service => String(service.technician_id) === String(technician.id));
-      const points = (await Promise.all(technicianServices.map(async service => ({ service, position: await geocode(service) })))).filter(item => item.position);
+      const resolvedPoints = await Promise.all(technicianServices.map(async service => ({ service, position: await geocode(service) })));
+      unresolved += resolvedPoints.filter(item => !item.position?.position && !item.position?.address).length;
+      const points = resolvedPoints.filter(item => item.position?.position || item.position?.address);
       if (!points.length) continue;
       const renderer = new window.google.maps.DirectionsRenderer({ map: mapInstance.current, suppressMarkers: true, polylineOptions: { strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 } });
-      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: selectedBase, destination: selectedBase, waypoints: points.map(point => ({ location: point.position, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
+      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: selectedBase, destination: selectedBase, waypoints: points.map(point => ({ location: point.position.position || point.position.address, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
       if (!route) continue;
       renderer.setDirections(route); directionsRenderersRef.current.push(renderer);
       const legs = route.routes[0].legs || [];
@@ -487,7 +507,7 @@ function OperationsMap({workspace, refresh}) {
     const distanceKm = planned.reduce((sum, route) => sum + route.distanceKm, 0);
     const durationMinutes = planned.reduce((sum, route) => sum + route.durationMinutes, 0);
     setRouteSummary({ total, distanceKm, durationMinutes });
-    setRouteMessage(`${total} serviço${total === 1 ? "" : "s"} planeado${total === 1 ? "" : "s"} para ${routeDate.split("-").reverse().join("/")}. A rota já está visível no mapa.`);
+    setRouteMessage(`${total} serviço${total === 1 ? "" : "s"} planeado${total === 1 ? "" : "s"} para ${routeDate.split("-").reverse().join("/")}. ${unresolved ? `${unresolved} morada${unresolved === 1 ? "" : "s"} não foi${unresolved === 1 ? "" : "ram"} reconhecida${unresolved === 1 ? "" : "s"}; reveja a morada, código postal e localidade.` : "Todas as moradas foram reconhecidas."} A rota já está visível no mapa.`);
     setRouteBusy(false);
   }
 
@@ -518,10 +538,10 @@ function OperationsMap({workspace, refresh}) {
     const query = search.trim();
     if (!query || !geocoderRef.current || !mapInstance.current) return;
     setSearching(true); setError("");
-    geocoderRef.current.geocode({ address: `${query}, Portugal`, region: "PT" }, (results, status) => {
+    geocoderRef.current.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => {
       setSearching(false);
       if (status === "OK" && results[0]) { mapInstance.current.setCenter(results[0].geometry.location); mapInstance.current.setZoom(16); }
-      else setError("Não foi possível encontrar essa morada ou código postal.");
+      else setError(`Não foi possível encontrar “${query}”. Tente morada, código postal e localidade.`);
     });
   }
 

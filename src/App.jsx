@@ -460,9 +460,10 @@ function OperationsMap({workspace, refresh}) {
     if (!candidates.length) { setRouteMessage("Não existem serviços atribuídos para este técnico e dia com morada válida."); setRouteBusy(false); return; }
     const clean = value => String(value || "").trim();
     const addressQueriesOf = service => {
-      const address = clean(service.address || service.street || service.street_address || service.morada || service.rua);
-      const postalCode = clean(service.postal_code || service.postcode || service.zip_code || service.zipcode || service.codigo_postal || service.codigoPostal).replace(/\s+/g, "");
-      const city = clean(service.city || service.locality || service.municipality || service.cidade || service.concelho);
+      const client = service.client_address || service.client || {};
+      const address = clean(service.address || service.street || service.street_address || service.morada || service.rua || client.address || client.street || client.street_address || client.morada || client.rua);
+      const postalCode = clean(service.postal_code || service.postcode || service.zip_code || service.zipcode || service.codigo_postal || service.codigoPostal || client.postal_code || client.postcode || client.zip_code || client.zipcode || client.codigo_postal || client.codigoPostal).replace(/\s+/g, "");
+      const city = clean(service.city || service.locality || service.municipality || service.cidade || service.concelho || client.city || client.locality || client.municipality || client.cidade || client.concelho);
       const postalVariants = [...new Set([postalCode, postalCode.replace("-", " "), postalCode.replace("-", "")].filter(Boolean))];
       return [...new Set([
         ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
@@ -475,12 +476,17 @@ function OperationsMap({workspace, refresh}) {
     const geocode = async service => {
       const queries = addressQueriesOf(service);
       const key = queries.join(" | ");
-      if (geocodeCache.current.has(key)) return geocodeCache.current.get(key);
+      if (geocodeCache.current.has(key)) {
+        const cached = geocodeCache.current.get(key);
+        return cached && cached.position ? cached : cached ? { position: cached, address: queries[0] || "" } : { position: null, address: queries[0] || "" };
+      }
       for (const query of queries) {
         const position = await new Promise(resolve => geocoderRef.current.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
         if (position) { const resolved = { position, address: query }; geocodeCache.current.set(key, resolved); return resolved; }
       }
-      const fallback = { position: null, address: queries[0] || "" };
+      const lat = Number(service.latitude ?? service.lat ?? service.client_address?.latitude ?? service.client_address?.lat);
+      const lng = Number(service.longitude ?? service.lng ?? service.client_address?.longitude ?? service.client_address?.lng);
+      const fallback = Number.isFinite(lat) && Number.isFinite(lng) ? { position: new window.google.maps.LatLng(lat, lng), address: queries[0] || "Coordenadas guardadas" } : { position: null, address: queries[0] || "" };
       geocodeCache.current.set(key, fallback);
       return fallback;
     };
@@ -496,7 +502,8 @@ function OperationsMap({workspace, refresh}) {
         continue;
       }
       const renderer = new window.google.maps.DirectionsRenderer({ map: mapInstance.current, suppressMarkers: true, polylineOptions: { strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 } });
-      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: selectedBase, destination: selectedBase, waypoints: points.map(point => ({ location: point.position.position || point.position.address, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
+      const basePosition = { lat: selectedBase.lat, lng: selectedBase.lng };
+      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: basePosition, destination: basePosition, waypoints: points.map(point => ({ location: point.position.position || point.position.address, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
       if (!route) {
         planned.push({ technician, services: technicianServices, distanceKm: 0, durationMinutes: 0, unrouted: true });
         continue;
@@ -771,7 +778,7 @@ function Calendar({workspace,refresh}) {
     setMoving(false); if(error) return alert(error.message); load();
   }
   return <div><Header title="Calendário" subtitle="Planeamento semanal por técnico e disponibilidade" action={<div className="calendar-nav"><button className="ghost" aria-label="Semana anterior" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()-7))}>‹ <span>Anterior</span></button><button className="today-btn" onClick={()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();const diff=day===0?-6:1-day;d.setDate(d.getDate()+diff);setWeekStart(d)}}>Hoje</button><button className="ghost" aria-label="Próxima semana" onClick={()=>setWeekStart(new Date(weekStart.getFullYear(),weekStart.getMonth(),weekStart.getDate()+7))}><span>Próxima</span> ›</button></div>}/> 
-    <div className="calendar-toolbar"><div><span className="eyebrow">Planeamento</span><strong>{weekLabel}</strong></div><div className="calendar-controls"><label>Técnico<select value={filterTech} onChange={e=>setFilterTech(e.target.value)}><option value="all">Todos os técnicos</option>{techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><span className="calendar-count">{services.length} {services.length===1?"serviço agendado":"serviços agendados"}</span></div></div>
+    <div className="calendar-toolbar"><div><span className="eyebrow">Planeamento</span><strong>{weekLabel}</strong></div><div className="calendar-controls"><label>T��cnico<select value={filterTech} onChange={e=>setFilterTech(e.target.value)}><option value="all">Todos os técnicos</option>{techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><span className="calendar-count">{services.length} {services.length===1?"serviço agendado":"serviços agendados"}</span></div></div>
     <div className="calendar-legend"><span><i className="legend-dot booked"/> Serviço marcado</span><span><i className="legend-dot unavailable"/> Técnico indisponível</span><span><i className="legend-euro">€</i> A faturar</span></div>
     <div className="panel calendar-board">
       <div className="calendar-grid-header"><div className="day-label-cell">Data</div>{techs.filter(t=>filterTech==="all"||String(t.id)===String(filterTech)).map(t=><div key={t.id} className="tech-head"><span className="tech-avatar">{t.name.slice(0,1).toUpperCase()}</span><strong>{t.name}</strong></div>)}</div>

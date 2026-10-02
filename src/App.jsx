@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
@@ -373,7 +373,7 @@ function OperationsMap({workspace, refresh}) {
     const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
     if (!key) { setError("Configure a chave do Google Maps para ativar o mapa."); return; }
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry,places`;
     script.async = true; script.defer = true; script.onload = () => setMapReady(true); script.onerror = () => setError("Não foi possível carregar o Google Maps.");
     document.head.appendChild(script);
     return () => { if (script.parentNode) script.parentNode.removeChild(script); };
@@ -604,6 +604,21 @@ function Kanban({workspace,setRefresh}) {
 
 function Modal({title,close,children}){return <div className="modal-back"><div className="modal"><div className="modal-head"><h2>{title}</h2><button className="icon-btn" onClick={close}><X size={18}/></button></div>{children}</div></div>}
 
+function AddressAutocomplete({value,onChange,placeholder="Rua, número, localidade"}) {
+  const inputRef=useRef(null);
+  useEffect(()=>{
+    if(!inputRef.current||!window.google?.maps?.places?.Autocomplete)return;
+    const autocomplete=new window.google.maps.places.Autocomplete(inputRef.current,{componentRestrictions:{country:"pt"},fields:["formatted_address","address_components","geometry","place_id"]});
+    const listener=autocomplete.addListener("place_changed",()=>{
+      const place=autocomplete.getPlace();
+      const components=Object.fromEntries((place.address_components||[]).flatMap(component=>component.types.map(type=>[type,component.long_name])));
+      onChange({address:place.formatted_address||inputRef.current.value,postal_code:components.postal_code||"",city:components.locality||components.postal_town||components.administrative_area_level_2||""});
+    });
+    return()=>window.google?.maps?.event?.removeListener(listener);
+  },[onChange]);
+  return <input ref={inputRef} value={value||""} placeholder={placeholder} autoComplete="street-address" onChange={e=>onChange({address:e.target.value})}/>;
+}
+
 function Clients({workspace,setRefresh}) {
   const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState(""),[editing,setEditing]=useState(null),[busy,setBusy]=useState(false),[profile,setProfile]=useState(null),[profileServices,setProfileServices]=useState([]);
   const emptyClient={name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""};
@@ -630,7 +645,7 @@ function Clients({workspace,setRefresh}) {
   return <div><Header title="Clientes" subtitle="Clientes, contactos, moradas e localização" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo cliente</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente…" value={q} onChange={e=>setQ(e.target.value)}/></div></div>
     <div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Telefone</th><th>Cidade</th><th>Morada</th><th>Mapa</th><th aria-label="Ações"></th></tr></thead><tbody>{f.map(c=><tr key={c.id} onClick={()=>openProfile(c)} className="click-row"><td><strong>{c.name}</strong></td><td>{c.contact_name||"—"}</td><td>{c.phone||"—"}</td><td>{c.city||"—"}</td><td>{c.address||"—"}</td><td>{maps(c)?<a className="table-link" href={maps(c)} target="_blank" rel="noreferrer">Abrir mapa</a>:"—"}</td><td><div className="row-actions"><button className="icon-btn small" aria-label={`Editar ${c.name}`} onClick={()=>editClient(c)}><Pencil size={14}/></button><button className="icon-btn small danger-icon" aria-label={`Eliminar ${c.name}`} onClick={()=>removeClient(c)} disabled={busy}><Trash2 size={14}/></button></div></td></tr>)}{!f.length&&<tr><td colSpan="7" className="empty">Sem clientes.</td></tr>}</tbody></table></div></div>
-    {open&&<Modal title={editing?"Editar cliente":"Novo cliente"} close={()=>{setOpen(false);setEditing(null);setForm(emptyClient)}}><form onSubmit={save} className="form-grid client-form"><div className="form-section-heading span2"><span className="form-section-icon"><Users size={16}/></span><div><strong>Dados do cliente</strong><small>Identificação e contactos principais</small></div></div>{["name","contact_name","phone","email","address","postal_code","city"].map(k=><label key={k}>{({name:"Nome completo",contact_name:"Pessoa de contacto",phone:"Telefone",email:"Email",address:"Morada",postal_code:"Código postal",city:"Cidade"})[k]}<input required={k==="name"} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}<label className="span2">Notas internas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":editing?"Guardar alterações":"Criar cliente"}</button></div></form></Modal>}
+    {open&&<Modal title={editing?"Editar cliente":"Novo cliente"} close={()=>{setOpen(false);setEditing(null);setForm(emptyClient)}}><form onSubmit={save} className="form-grid client-form"><div className="form-section-heading span2"><span className="form-section-icon"><Users size={16}/></span><div><strong>Dados do cliente</strong><small>Identificação e contactos principais</small></div></div>{["name","contact_name","phone","email","address","postal_code","city"].map(k=><label key={k}>{({name:"Nome completo",contact_name:"Pessoa de contacto",phone:"Telefone",email:"Email",address:"Morada",postal_code:"Código postal",city:"Cidade"})[k]}{k==="address"?<AddressAutocomplete value={form.address} onChange={next=>setForm(current=>({...current,...next}))}/>:<input required={k==="name"} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/>}</label>)}<label className="span2">Notas internas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":editing?"Guardar alterações":"Criar cliente"}</button></div></form></Modal>}
   {profile&&<Modal title={profile.name} close={()=>setProfile(null)}><div className="client-profile"><div className="client-profile-grid"><div><span>Serviços em aberto</span><strong>{profileServices.filter(item=>!['completed','invoiced','cancelled'].includes(item.board_status)).length}</strong></div><div><span>Total de serviços</span><strong>{profileServices.length}</strong></div><div><span>Contacto</span><strong>{profile.contact_name||"—"}</strong></div><div><span>Telefone</span><strong>{profile.phone||"—"}</strong></div><div><span>Email</span><strong>{profile.email||"—"}</strong></div><div><span>Morada</span><strong>{[profile.address,profile.postal_code,profile.city].filter(Boolean).join(", ")||"—"}</strong></div></div><h3>Histórico de assistência</h3><ServiceTable rows={profileServices} onSelect={()=>{}}/></div></Modal>}</div>
 }
 

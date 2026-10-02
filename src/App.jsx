@@ -317,6 +317,7 @@ function OperationsMap({workspace, refresh}) {
   const geocoderRef = React.useRef(null);
   const markersRef = React.useRef([]);
   const directionsRenderersRef = React.useRef([]);
+  const routePolylinesRef = React.useRef([]);
   const [routeBase, setRouteBase] = useState("PACK4 Soluções para indústria");
   const [routeTechnician, setRouteTechnician] = useState("all");
   const [routeDate, setRouteDate] = useState(new Date().toISOString().slice(0, 10));
@@ -447,10 +448,12 @@ function OperationsMap({workspace, refresh}) {
   }, [mapReady, services, filter]);
 
   async function planRoutes() {
-    if (!mapInstance.current || !geocoderRef.current || !window.google?.maps) return;
+    if (!mapInstance.current || !window.google?.maps) return;
     setRouteBusy(true); setRouteMessage(""); setError(""); setPlannedRoutes([]); setRouteSummary(null);
     directionsRenderersRef.current.forEach(renderer => renderer.setMap(null));
     directionsRenderersRef.current = [];
+    routePolylinesRef.current.forEach(polyline => polyline.setMap(null));
+    routePolylinesRef.current = [];
     const selectedBase = SERVICE_BASES.find(base => base.name === routeBase) || SERVICE_BASES[0];
     const candidates = services.filter(service => {
       const serviceDay = service.scheduled_start ? new Date(service.scheduled_start).toISOString().slice(0, 10) : "";
@@ -481,12 +484,27 @@ function OperationsMap({workspace, refresh}) {
         return cached && cached.position ? cached : cached ? { position: cached, address: queries[0] || "" } : { position: null, address: queries[0] || "" };
       }
       for (const query of queries) {
-        const position = await new Promise(resolve => geocoderRef.current.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
+        try {
+          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=pt&q=${encodeURIComponent(query)}`, { headers: { Accept: "application/json" } });
+          const results = await response.json();
+          const first = results?.[0];
+          if (first?.lat && first?.lon) {
+            const resolved = { position: new window.google.maps.LatLng(Number(first.lat), Number(first.lon)), address: first.display_name || query };
+            geocodeCache.current.set(key, resolved); return resolved;
+          }
+        } catch (error) { console.warn("[v0] OSM geocoding fallback failed", error); }
+      }
+      for (const query of queries) {
+        const position = await new Promise(resolve => geocoderRef.current?.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
         if (position) { const resolved = { position, address: query }; geocodeCache.current.set(key, resolved); return resolved; }
       }
       const lat = Number(service.latitude ?? service.lat ?? service.client_address?.latitude ?? service.client_address?.lat);
       const lng = Number(service.longitude ?? service.lng ?? service.client_address?.longitude ?? service.client_address?.lng);
-      const fallback = Number.isFinite(lat) && Number.isFinite(lng) ? { position: new window.google.maps.LatLng(lat, lng), address: queries[0] || "Coordenadas guardadas" } : { position: null, address: queries[0] || "" };
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const fallback = { position: new window.google.maps.LatLng(lat, lng), address: queries[0] || "Coordenadas guardadas" };
+        geocodeCache.current.set(key, fallback); return fallback;
+      }
+      const fallback = { position: null, address: queries[0] || "" };
       geocodeCache.current.set(key, fallback);
       return fallback;
     };
@@ -505,6 +523,25 @@ function OperationsMap({workspace, refresh}) {
       const basePosition = { lat: selectedBase.lat, lng: selectedBase.lng };
       const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: basePosition, destination: basePosition, waypoints: points.map(point => ({ location: point.position.position || point.position.address, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
       if (!route) {
+        const coordinates = [
+          [selectedBase.lng, selectedBase.lat],
+          ...points.map(point => [point.position.position.lng(), point.position.position.lat()]),
+          [selectedBase.lng, selectedBase.lat],
+        ];
+        try {
+          const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordinates.map(([lng, lat]) => `${lng},${lat}`).join(";")}?overview=full&geometries=geojson&steps=false`);
+          const osrm = await response.json();
+          const geometry = osrm?.routes?.[0]?.geometry?.coordinates || [];
+          if (geometry.length) {
+            const path = geometry.map(([lng, lat]) => ({ lat, lng }));
+            const polyline = new window.google.maps.Polyline({ map: mapInstance.current, path, strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 });
+            routePolylinesRef.current.push(polyline);
+            const osrmRoute = osrm.routes[0];
+            const ordered = points.map(point => point.service);
+            planned.push({ technician, services: ordered, distanceKm: (osrmRoute.distance || 0) / 1000, durationMinutes: (osrmRoute.duration || 0) / 60, fallbackRoute: true });
+            continue;
+          }
+        } catch (error) { console.warn("[v0] OSRM routing fallback failed", error); }
         planned.push({ technician, services: technicianServices, distanceKm: 0, durationMinutes: 0, unrouted: true });
         continue;
       }

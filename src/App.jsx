@@ -523,9 +523,14 @@ function OperationsMap({workspace, refresh}) {
       const basePosition = { lat: selectedBase.lat, lng: selectedBase.lng };
       const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: basePosition, destination: basePosition, waypoints: points.map(point => ({ location: point.position.position || point.position.address, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
       if (!route) {
+        const coordinatePoints = points.filter(point => point.position?.position && typeof point.position.position.lng === "function" && typeof point.position.position.lat === "function");
+        if (coordinatePoints.length !== points.length) {
+          planned.push({ technician, services: technicianServices, distanceKm: 0, durationMinutes: 0, unrouted: true });
+          continue;
+        }
         const coordinates = [
           [selectedBase.lng, selectedBase.lat],
-          ...points.map(point => [point.position.position.lng(), point.position.position.lat()]),
+          ...coordinatePoints.map(point => [point.position.position.lng(), point.position.position.lat()]),
           [selectedBase.lng, selectedBase.lat],
         ];
         try {

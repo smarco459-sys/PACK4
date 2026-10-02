@@ -209,7 +209,7 @@ function Dashboard({workspace}) {
   <Kpi icon={CheckCircle2} label="Concluídos" value={m.data?.completed_services ?? "—"}/>
   <Kpi icon={Euro} label="A faturar" value={m.data?.to_invoice_amount != null ? money(m.data.to_invoice_amount) : "—"}/>
   </div>
-  <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Hoje</span><h2>Operação do dia</h2></div><span className="section-caption">Atualizado em tempo real</span></div><div className="manager-metrics"><Metric label="Serviços hoje" value={today.length}/><Metric label="Técnicos ocupados" value={busyTechnicians}/><Metric label="Técnicos disponíveis" value={Math.max(0,(technicians.data||[]).length-busyTechnicians)}/><Metric label="Serviços atrasados" value={overdue} tone={overdue>0?"danger":"good"}/></div></section>
+  <section className="dashboard-section operations-today"><div className="section-heading"><div><span className="eyebrow">Resumo operacional</span><h2>Operação do dia</h2></div><span className="live-status"><i/>Atualizado em tempo real</span></div><div className="manager-metrics"><Metric label="Serviços hoje" value={today.length}/><Metric label="Técnicos ocupados" value={busyTechnicians}/><Metric label="Técnicos disponíveis" value={Math.max(0,(technicians.data||[]).length-busyTechnicians)}/><Metric label="Serviços atrasados" value={overdue} tone={overdue>0?"danger":"good"}/></div></section>
   <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Financeiro</span><h2>Visão financeira</h2></div></div><div className="manager-metrics financial"><Metric label="€ faturados" value={money(billed)}/><Metric label="€ em concluídos" value={money(completedValue)}/><Metric label="Valor médio / serviço" value={money(averageValue)}/></div></section>
   <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Operação</span><h2>Distribuição de serviços</h2></div></div><div className="dashboard-breakdowns"><Breakdown title="Serviços por técnico" rows={technicianBreakdown}/><Breakdown title="Serviços por cliente" rows={clientBreakdown}/></div></section>
   <div className="grid-2">
@@ -224,7 +224,7 @@ function Dashboard({workspace}) {
 }
 
   function Kpi({icon:Icon,label,value}) { return <div className="kpi"><div className="kpi-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong></div></div> }
-  function Metric({label,value,tone="default"}) { return <div className={`manager-metric ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
+  function Metric({label,value,tone="default"}) { return <div className={`manager-metric ${tone}`}><span>{label}</span><strong>{value}</strong>{tone==="danger"&&value>0?<small>Requer atenção</small>:tone==="good"?<small>Dentro do esperado</small>:null}</div> }
   function Breakdown({title,rows}) { return <div className="breakdown"><h3>{title}</h3>{rows.length?rows.map(([label,count])=><div className="breakdown-row" key={label}><span>{label}</span><strong>{count}</strong></div>):<div className="muted small-text">Sem dados disponíveis.</div>}</div> }
   function Loading(){return <div className="loading">A carregar…</div>}
 function ErrorBox({e}){return <div className="alert danger">{e?.message || "Ocorreu um erro."}</div>}

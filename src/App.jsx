@@ -436,8 +436,6 @@ function OperationsMap({workspace, refresh}) {
       visible.forEach(({ service, position }) => {
         const statusColor = colors[service.board_status] || colors.pending;
         const marker = new window.google.maps.Marker({ map, position, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
-        const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${escapeHtml(service.client_name || "Cliente")}</strong><span>${escapeHtml(service.title || "Serviço")}</span><small>${escapeHtml(service.technician_name || "Por atribuir")} · ${escapeHtml(service.board_status || "pendente")}<br/>${escapeHtml(addressOf(service) || "Coordenadas guardadas")}</small></div>` });
-        marker.addListener("click", () => info.open({ map, anchor: marker }));
         markersRef.current.push(marker); bounds.extend(position);
       });
       if (visible.length) map.fitBounds(bounds, 70);

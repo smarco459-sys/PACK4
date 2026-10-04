@@ -378,7 +378,7 @@ function OperationsMap({workspace, refresh}) {
     const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
     if (!key) { setError("Configure a chave do Google Maps para ativar o mapa."); return; }
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry,places`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry,places&loading=async`;
     script.async = true; script.defer = true; script.onload = () => setMapReady(true); script.onerror = () => setError("Não foi possível carregar o Google Maps.");
     document.head.appendChild(script);
     return () => { if (script.parentNode) script.parentNode.removeChild(script); };
@@ -404,21 +404,28 @@ function OperationsMap({workspace, refresh}) {
         ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
         [address, city, "Portugal"].filter(Boolean).join(", "),
         ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
-        [city, "Portugal"].filter(Boolean).join(", "),
       ];
-      return [...new Set(queries.filter(query => query.length > "Portugal".length))];
+      return [...new Set(queries.filter(query => query.length > "Portugal".length && (address || postalCode)))];
     };
     const escapeHtml = value => String(value || "").replace(/[&<>'"]/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[character]));
     async function resolvePosition(service) {
       const queries = addressQueriesOf(service);
       const cacheKey = queries.join(" | ");
       if (geocodeCache.current.has(cacheKey)) return geocodeCache.current.get(cacheKey);
+      if (!queries.length || !geocoderRef.current) {
+        const empty = null;
+        geocodeCache.current.set(cacheKey, empty);
+        return empty;
+      }
       for (const address of queries) {
         const result = await new Promise(resolve => geocoderRef.current.geocode({
           address,
           region: "PT",
           componentRestrictions: { country: "PT" },
-        }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
+        }, (results, status) => {
+          const first = results?.[0];
+          resolve(status === "OK" && first?.geometry?.location ? first.geometry.location.toJSON() : null);
+        }));
         if (result) {
           geocodeCache.current.set(cacheKey, result);
           return result;
@@ -474,8 +481,7 @@ function OperationsMap({workspace, refresh}) {
         ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
         [address, city, "Portugal"].filter(Boolean).join(", "),
         ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
-        [city, "Portugal"].filter(Boolean).join(", "),
-      ].filter(query => query.length > "Portugal".length))];
+      ].filter(query => query.length > "Portugal".length && (address || postalCode)))];
     };
     const addressOf = service => addressQueriesOf(service)[0] || "";
     const geocode = async service => {

@@ -502,10 +502,6 @@ function OperationsMap({workspace, refresh}) {
           }
         } catch (error) { console.warn("[v0] OSM geocoding fallback failed", error); }
       }
-      for (const query of queries) {
-        const position = await new Promise(resolve => geocoderRef.current?.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
-        if (position) { const resolved = { position, address: query }; geocodeCache.current.set(key, resolved); return resolved; }
-      }
       const lat = Number(service.latitude ?? service.lat ?? service.client_address?.latitude ?? service.client_address?.lat);
       const lng = Number(service.longitude ?? service.lng ?? service.client_address?.longitude ?? service.client_address?.lng);
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
@@ -528,8 +524,7 @@ function OperationsMap({workspace, refresh}) {
         continue;
       }
       const renderer = new window.google.maps.DirectionsRenderer({ map: mapInstance.current, suppressMarkers: true, polylineOptions: { strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 } });
-      const basePosition = { lat: selectedBase.lat, lng: selectedBase.lng };
-      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: basePosition, destination: basePosition, waypoints: points.map(point => ({ location: point.position.position || point.position.address, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
+      const route = null; // OSM/OSRM is the primary routing provider; Google is no longer used for Directions.
       if (!route) {
         const coordinatePoints = points.filter(point => point.position?.position && typeof point.position.position.lng === "function" && typeof point.position.position.lat === "function");
         if (coordinatePoints.length !== points.length) {

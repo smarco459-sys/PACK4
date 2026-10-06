@@ -14,19 +14,10 @@ const SERVICE_BASES = [
   { name: "Mafra", lat: 38.9369, lng: -9.3276 },
 ];
 
-const nav = [
-  ["/", "Dashboard", LayoutDashboard],
-  ["/servicos", "Serviços", Wrench],
+  const nav = [
   ["/kanban", "Kanban", CircleDot],
   ["/calendario", "Calendário", CalendarDays],
-  ["/clientes", "Clientes", Users],
-  ["/tecnicos", "Técnicos", UserRoundCog],
-  ["/pecas", "Peças", Package],
-  ["/relatorios", "Relatórios", BarChart3],
-  ["/mapa", "Mapa operacional", MapPin],
-  ["/importacao", "Importar dados", Upload],
-  ["/definicoes", "Definições", Settings],
-];
+  ];
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -138,18 +129,10 @@ function Shell({ session }) {
     </aside>
     <main className="main">
       <Routes location={undefined} key={refresh}>
-        <Route path="/" element={<Dashboard workspace={workspace} refresh={refresh} />} />
-        <Route path="/servicos" element={<Services workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
+        <Route path="/" element={<Navigate to="/kanban" replace/>}/>
         <Route path="/kanban" element={<Kanban workspace={workspace} setRefresh={setRefresh}/>} />
         <Route path="/calendario" element={<Calendar workspace={workspace} refresh={refresh}/>} />
-        <Route path="/clientes" element={<Clients workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
-        <Route path="/tecnicos" element={<Technicians workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
-        <Route path="/pecas" element={<Parts workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
-        <Route path="/relatorios" element={<Reports workspace={workspace} refresh={refresh}/>} />
-        <Route path="/mapa" element={<OperationsMap workspace={workspace} refresh={refresh}/>} />
-        <Route path="/importacao" element={<ImportCenter workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
-        <Route path="/definicoes" element={<SettingsPage session={session} workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
-        <Route path="*" element={<Navigate to="/" replace/>}/>
+        <Route path="*" element={<Navigate to="/kanban" replace/>}/>
       </Routes>
     </main>
   </div>;

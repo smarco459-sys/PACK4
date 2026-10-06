@@ -14,19 +14,10 @@ const SERVICE_BASES = [
   { name: "Mafra", lat: 38.9369, lng: -9.3276 },
 ];
 
-const nav = [
-  ["/", "Dashboard", LayoutDashboard],
-  ["/servicos", "Serviços", Wrench],
+  const nav = [
   ["/kanban", "Kanban", CircleDot],
   ["/calendario", "Calendário", CalendarDays],
-  ["/clientes", "Clientes", Users],
-  ["/tecnicos", "Técnicos", UserRoundCog],
-  ["/pecas", "Peças", Package],
-  ["/relatorios", "Relatórios", BarChart3],
-  ["/mapa", "Mapa operacional", MapPin],
-  ["/importacao", "Importar dados", Upload],
-  ["/definicoes", "Definições", Settings],
-];
+  ];
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -138,18 +129,10 @@ function Shell({ session }) {
     </aside>
     <main className="main">
       <Routes location={undefined} key={refresh}>
-        <Route path="/" element={<Dashboard workspace={workspace} refresh={refresh} />} />
-        <Route path="/servicos" element={<Services workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
+        <Route path="/" element={<Navigate to="/kanban" replace/>}/>
         <Route path="/kanban" element={<Kanban workspace={workspace} setRefresh={setRefresh}/>} />
         <Route path="/calendario" element={<Calendar workspace={workspace} refresh={refresh}/>} />
-        <Route path="/clientes" element={<Clients workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
-        <Route path="/tecnicos" element={<Technicians workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
-        <Route path="/pecas" element={<Parts workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
-        <Route path="/relatorios" element={<Reports workspace={workspace} refresh={refresh}/>} />
-        <Route path="/mapa" element={<OperationsMap workspace={workspace} refresh={refresh}/>} />
-        <Route path="/importacao" element={<ImportCenter workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
-        <Route path="/definicoes" element={<SettingsPage session={session} workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
-        <Route path="*" element={<Navigate to="/" replace/>}/>
+        <Route path="*" element={<Navigate to="/kanban" replace/>}/>
       </Routes>
     </main>
   </div>;
@@ -161,8 +144,13 @@ function Header({title, subtitle, action}) {
 
 function useData(loader, deps=[]) {
   const [state,setState]=useState({data:null,error:null,loading:true});
-  const run=async()=>{setState(s=>({...s,loading:true})); try { const data=await loader(); setState({data,error:null,loading:false}); } catch(e){setState({data:null,error:e,loading:false});} };
-  useEffect(()=>{run()},deps);
+  const run=async()=>{setState(s=>({...s,loading:true,error:null})); try { const data=await loader(); setState({data,error:null,loading:false}); return data; } catch(e){setState({data:null,error:e,loading:false}); return null;} };
+  useEffect(()=>{
+    let cancelled=false;
+    setState(s=>({...s,loading:true,error:null}));
+    loader().then(data=>{if(!cancelled)setState({data,error:null,loading:false})}).catch(error=>{if(!cancelled)setState({data:null,error,loading:false})});
+    return()=>{cancelled=true};
+  },deps);
   return {...state,reload:run};
 }
 
@@ -202,7 +190,7 @@ function Dashboard({workspace}) {
   const money=value=>`€ ${Number(value||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}`;
   return <div>
   <Header title="Dashboard gestor" subtitle="A situação operacional da PACK4 em 10 segundos"
-  action={<button className="icon-btn" onClick={()=>location.reload()}><RefreshCw size={17}/></button>}/>
+  action={<button className="icon-btn" aria-label="Atualizar dashboard" title="Atualizar dados" onClick={()=>{m.reload();recent.reload();technicians.reload();operational.reload()}}><RefreshCw size={17}/></button>}/>
   <div className="kpis">
   <Kpi icon={Clock3} label="Pendentes" value={m.data?.pending_services ?? "—"}/>
   <Kpi icon={CircleDot} label="Agendados" value={m.data?.scheduled_services ?? "—"}/>
@@ -211,7 +199,6 @@ function Dashboard({workspace}) {
   </div>
   <section className="dashboard-section operations-today"><div className="section-heading"><div><span className="eyebrow">Resumo operacional</span><h2>Operação do dia</h2></div><span className="live-status"><i/>Atualizado em tempo real</span></div><div className="manager-metrics"><Metric label="Serviços hoje" value={today.length}/><Metric label="Técnicos ocupados" value={busyTechnicians}/><Metric label="Técnicos disponíveis" value={Math.max(0,(technicians.data||[]).length-busyTechnicians)}/><Metric label="Serviços atrasados" value={overdue} tone={overdue>0?"danger":"good"}/></div></section>
   <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Financeiro</span><h2>Visão financeira</h2></div></div><div className="manager-metrics financial"><Metric label="€ faturados" value={money(billed)}/><Metric label="€ em concluídos" value={money(completedValue)}/><Metric label="Valor médio / serviço" value={money(averageValue)}/></div></section>
-  <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Operação</span><h2>Distribuição de serviços</h2></div></div><div className="dashboard-breakdowns"><Breakdown title="Serviços por técnico" rows={technicianBreakdown}/><Breakdown title="Serviços por cliente" rows={clientBreakdown}/></div></section>
   <div className="grid-2">
       <section className="panel"><div className="panel-head"><h2>Serviços recentes</h2><NavLink to="/servicos">Ver todos <ChevronRight size={15}/></NavLink></div>
         {recent.loading ? <Loading/> : recent.error ? <ErrorBox e={recent.error}/> : <ServiceTable rows={recent.data}/>}
@@ -374,7 +361,7 @@ function OperationsMap({workspace, refresh}) {
     const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
     if (!key) { setError("Configure a chave do Google Maps para ativar o mapa."); return; }
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry,places`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry,places&loading=async`;
     script.async = true; script.defer = true; script.onload = () => setMapReady(true); script.onerror = () => setError("Não foi possível carregar o Google Maps.");
     document.head.appendChild(script);
     return () => { if (script.parentNode) script.parentNode.removeChild(script); };
@@ -400,21 +387,28 @@ function OperationsMap({workspace, refresh}) {
         ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
         [address, city, "Portugal"].filter(Boolean).join(", "),
         ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
-        [city, "Portugal"].filter(Boolean).join(", "),
       ];
-      return [...new Set(queries.filter(query => query.length > "Portugal".length))];
+      return [...new Set(queries.filter(query => query.length > "Portugal".length && (address || postalCode)))];
     };
     const escapeHtml = value => String(value || "").replace(/[&<>'"]/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[character]));
     async function resolvePosition(service) {
       const queries = addressQueriesOf(service);
       const cacheKey = queries.join(" | ");
       if (geocodeCache.current.has(cacheKey)) return geocodeCache.current.get(cacheKey);
+      if (!queries.length || !geocoderRef.current) {
+        const empty = null;
+        geocodeCache.current.set(cacheKey, empty);
+        return empty;
+      }
       for (const address of queries) {
         const result = await new Promise(resolve => geocoderRef.current.geocode({
           address,
           region: "PT",
           componentRestrictions: { country: "PT" },
-        }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location.toJSON() : null)));
+        }, (results, status) => {
+          const first = results?.[0];
+          resolve(status === "OK" && first?.geometry?.location ? first.geometry.location.toJSON() : null);
+        }));
         if (result) {
           geocodeCache.current.set(cacheKey, result);
           return result;
@@ -437,8 +431,6 @@ function OperationsMap({workspace, refresh}) {
       visible.forEach(({ service, position }) => {
         const statusColor = colors[service.board_status] || colors.pending;
         const marker = new window.google.maps.Marker({ map, position, title: `${service.client_name || "Cliente"} — ${service.title}`, icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: statusColor, fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3 } });
-        const info = new window.google.maps.InfoWindow({ content: `<div class="map-info"><strong>${escapeHtml(service.client_name || "Cliente")}</strong><span>${escapeHtml(service.title || "Serviço")}</span><small>${escapeHtml(service.technician_name || "Por atribuir")} · ${escapeHtml(service.board_status || "pendente")}<br/>${escapeHtml(addressOf(service) || "Coordenadas guardadas")}</small></div>` });
-        marker.addListener("click", () => info.open({ map, anchor: marker }));
         markersRef.current.push(marker); bounds.extend(position);
       });
       if (visible.length) map.fitBounds(bounds, 70);
@@ -472,8 +464,7 @@ function OperationsMap({workspace, refresh}) {
         ...postalVariants.map(postal => [address, postal, city, "Portugal"].filter(Boolean).join(", ")),
         [address, city, "Portugal"].filter(Boolean).join(", "),
         ...postalVariants.map(postal => [postal, city, "Portugal"].filter(Boolean).join(", ")),
-        [city, "Portugal"].filter(Boolean).join(", "),
-      ].filter(query => query.length > "Portugal".length))];
+      ].filter(query => query.length > "Portugal".length && (address || postalCode)))];
     };
     const addressOf = service => addressQueriesOf(service)[0] || "";
     const geocode = async service => {
@@ -493,10 +484,6 @@ function OperationsMap({workspace, refresh}) {
             geocodeCache.current.set(key, resolved); return resolved;
           }
         } catch (error) { console.warn("[v0] OSM geocoding fallback failed", error); }
-      }
-      for (const query of queries) {
-        const position = await new Promise(resolve => geocoderRef.current?.geocode({ address: query, region: "PT", componentRestrictions: { country: "PT" } }, (results, status) => resolve(status === "OK" && results[0] ? results[0].geometry.location : null)));
-        if (position) { const resolved = { position, address: query }; geocodeCache.current.set(key, resolved); return resolved; }
       }
       const lat = Number(service.latitude ?? service.lat ?? service.client_address?.latitude ?? service.client_address?.lat);
       const lng = Number(service.longitude ?? service.lng ?? service.client_address?.longitude ?? service.client_address?.lng);
@@ -520,8 +507,7 @@ function OperationsMap({workspace, refresh}) {
         continue;
       }
       const renderer = new window.google.maps.DirectionsRenderer({ map: mapInstance.current, suppressMarkers: true, polylineOptions: { strokeColor: "#173f7a", strokeOpacity: .82, strokeWeight: 5 } });
-      const basePosition = { lat: selectedBase.lat, lng: selectedBase.lng };
-      const route = await new Promise(resolve => new window.google.maps.DirectionsService().route({ origin: basePosition, destination: basePosition, waypoints: points.map(point => ({ location: point.position.position || point.position.address, stopover: true })), optimizeWaypoints: true, travelMode: window.google.maps.TravelMode.DRIVING }, (result, status) => resolve(status === "OK" ? result : null)));
+      const route = null; // OSM/OSRM is the primary routing provider; Google is no longer used for Directions.
       if (!route) {
         const coordinatePoints = points.filter(point => point.position?.position && typeof point.position.position.lng === "function" && typeof point.position.position.lat === "function");
         if (coordinatePoints.length !== points.length) {
@@ -606,7 +592,7 @@ function OperationsMap({workspace, refresh}) {
   const available = services.filter(service => service.address || service.postal_code || service.city || (Number.isFinite(Number(service.latitude)) && Number.isFinite(Number(service.longitude)))).length;
   return <div><Header title="Mapa operacional" subtitle="Pesquise por morada ou código postal e veja os serviços por estado" action={<select className="map-filter" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}</select>}/>
     <div className="map-summary">{counts.map(({status, count}) => <div className={`map-stat ${status}`} key={status} style={{"--status-color": colors[status]}}><i/><span>{statusLabels[status]}</span><strong>{count}</strong></div>)}</div>
-    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div><div className="route-planner"><div className="route-planner-title"><RouteIcon size={18}/><div><strong>Planeador de rotas</strong><span>Seleciona o dia e otimiza a sequência de visitas por técnico</span></div></div><label>Dia da agenda<input type="date" value={routeDate} onChange={e => { setRouteDate(e.target.value); setPlannedRoutes([]); }}/></label><label>Base de partida<select value={routeBase} onChange={e => setRouteBase(e.target.value)}>{SERVICE_BASES.map(base => <option key={base.name} value={base.name}>{base.name}</option>)}</select></label><label>Técnico<select value={routeTechnician} onChange={e => setRouteTechnician(e.target.value)}><option value="all">Todos os técnicos</option>{[...new Map(services.filter(service => service.technician_id).map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()].map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label><button className="primary route-button" type="button" onClick={planRoutes} disabled={routeBusy}><Navigation size={16}/>{routeBusy ? "A calcular…" : "Planear rotas"}</button>{plannedRoutes.length > 0 && <button className="secondary route-button" type="button" onClick={authorizeRouteOrder} disabled={routeSaving}>{routeSaving ? "A atualizar agenda…" : "Autorizar ordem na agenda"}</button>}</div>{routeMessage && <div className="map-message alert success">{routeMessage}</div>}{routeSummary && <div className="route-summary"><Metric label="Serviços" value={routeSummary.total}/><Metric label="Distância total" value={`${routeSummary.distanceKm.toFixed(1)} km`}/><Metric label="Tempo estimado" value={`${Math.floor(routeSummary.durationMinutes/60)}h ${Math.round(routeSummary.durationMinutes%60)}m`}/><Metric label="Custo deslocação (0,75 €/km)" value={`€ ${(routeSummary.distanceKm*DISTANCE_RATE).toLocaleString("pt-PT",{minimumFractionDigits:2})}`}/></div>}{error && <div className="map-message alert danger">{error}</div>}{plannedRoutes.length > 0 && <div className="route-results">{plannedRoutes.map(route => <div className="route-result" key={route.technician.id}><strong>{route.technician.name}</strong>{route.unrouted&&<div className="route-pending">Rota pendente — confirme as moradas</div>}<div className="route-result-meta"><span>{route.services.length} serviço{route.services.length===1?"":"s"}</span><span>{route.distanceKm.toFixed(1)} km</span><span>{Math.floor(route.durationMinutes/60)}h {Math.round(route.durationMinutes%60)}m</span><span>€ {(route.distanceKm*DISTANCE_RATE).toLocaleString("pt-PT",{minimumFractionDigits:2})}</span></div><ol>{route.services.map(service => <li key={service.id}>{service.client_name || "Cliente"}<span>{service.title}</span></li>)}</ol></div>)}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
+    <section className="panel operations-map"><div className="map-toolbar"><div><strong>Serviços geolocalizados</strong><span>{available} localizações disponíveis</span></div><form className="map-search" onSubmit={searchLocation}><input aria-label="Pesquisar morada ou código postal" value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar morada ou código postal…"/><button className="primary" type="submit" disabled={searching}>{searching ? "A procurar…" : "Pesquisar"}</button></form></div><div className="route-planner"><div className="route-planner-title"><RouteIcon size={18}/><div><strong>Planeador de rotas</strong><span>Seleciona o dia e otimiza a sequência de visitas por técnico</span></div></div><label>Dia da agenda<input type="date" value={routeDate} onChange={e => { setRouteDate(e.target.value); setPlannedRoutes([]); }}/></label><label>Base de partida<select value={routeBase} onChange={e => setRouteBase(e.target.value)}>{SERVICE_BASES.map(base => <option key={base.name} value={base.name}>{base.name}</option>)}</select></label><label>Técnico<select value={routeTechnician} onChange={e => setRouteTechnician(e.target.value)}><option value="all">Todos os técnicos</option>{[...new Map(services.filter(service => service.technician_id).map(service => [String(service.technician_id), { id: service.technician_id, name: service.technician_name || "Técnico" }])).values()].map(tech => <option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label><button className="primary route-button" type="button" onClick={planRoutes} disabled={routeBusy}><Navigation size={16}/>{routeBusy ? "A calcular…" : "Planear rotas"}</button>{plannedRoutes.length > 0 && <button className="secondary route-button" type="button" onClick={authorizeRouteOrder} disabled={routeSaving}>{routeSaving ? "A atualizar agenda…" : "Autorizar ordem na agenda"}</button>}</div>{routeMessage && <div className="map-message alert success">{routeMessage}</div>}{routeSummary && <div className="route-summary"><Metric label="Servi��os" value={routeSummary.total}/><Metric label="Distância total" value={`${routeSummary.distanceKm.toFixed(1)} km`}/><Metric label="Tempo estimado" value={`${Math.floor(routeSummary.durationMinutes/60)}h ${Math.round(routeSummary.durationMinutes%60)}m`}/><Metric label="Custo deslocação (0,75 €/km)" value={`€ ${(routeSummary.distanceKm*DISTANCE_RATE).toLocaleString("pt-PT",{minimumFractionDigits:2})}`}/></div>}{error && <div className="map-message alert danger">{error}</div>}{plannedRoutes.length > 0 && <div className="route-results">{plannedRoutes.map(route => <div className="route-result" key={route.technician.id}><strong>{route.technician.name}</strong>{route.unrouted&&<div className="route-pending">Rota pendente — confirme as moradas</div>}<div className="route-result-meta"><span>{route.services.length} serviço{route.services.length===1?"":"s"}</span><span>{route.distanceKm.toFixed(1)} km</span><span>{Math.floor(route.durationMinutes/60)}h {Math.round(route.durationMinutes%60)}m</span><span>€ {(route.distanceKm*DISTANCE_RATE).toLocaleString("pt-PT",{minimumFractionDigits:2})}</span></div><ol>{route.services.map(service => <li key={service.id}>{service.client_name || "Cliente"}<span>{service.title}</span></li>)}</ol></div>)}</div>}<div ref={mapRef} className="google-map" aria-label="Mapa dos serviços técnicos"/></section>
     <p className="map-note">A localização é obtida automaticamente através da morada, código postal e cidade da ficha do cliente. As coordenadas guardadas são usadas apenas como alternativa quando não existe morada.</p>
   </div>;
 }
@@ -636,7 +622,7 @@ function Services({workspace, setRefresh}) {
   const selectedClient=clients.find(client=>String(client.id)===String(form.client_id));
   const estimate=serviceEstimate(selectedClient,form.scheduled_start,form.scheduled_end);
   async function save(e){e.preventDefault();const payload={...form,workspace_id:workspace.id,created_by:(await supabase.auth.getUser()).data.user?.id,technician_id:form.technician_id||null,amount:Number(estimate.amount.toFixed(2)),billable:true,scheduled_start:localDateTimeToIso(form.scheduled_start),scheduled_end:localDateTimeToIso(form.scheduled_end),status:form.scheduled_start&&form.status==="pending"?"scheduled":form.status};const {error}=await supabase.from("services").insert(payload);if(error)return alert(error.message);setOpen(false);setForm(blank);load();setRefresh?.(x=>x+1)}
-  async function move(id,newStatus){const {error}=await supabase.from("services").update({status:newStatus,invoiced:newStatus==="completed"?false:false}).eq("id",id);if(error)alert(error.message);else{load();setRefresh?.(x=>x+1)}}
+  async function move(id,newStatus){const {error}=await supabase.from("services").update({status:newStatus,...(newStatus==="invoiced"?{invoiced:true}:{})}).eq("id",id);if(error)alert(error.message);else{await load();setRefresh?.(x=>x+1)}}
   return <div><Header title="Serviços" subtitle="Gestão operacional e acompanhamento das intervenções" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo serviço</button>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente, serviço ou técnico…" value={q} onChange={e=>setQ(e.target.value)}/></div><select value={status} onChange={e=>setStatus(e.target.value)}><option value="all">Todos os estados</option><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="invoiced">Faturado</option></select></div>
     <div className="panel"><ServiceTable rows={filtered} onSelect={setDetail}/><div className="quick-actions">{filtered.slice(0,10).map(r=><div className="quick-row" key={r.id}><button className="table-link" onClick={()=>setDetail(r)}>{r.client_name} — {r.title}</button><div><select value={r.status} onChange={e=>move(r.id,e.target.value)}><option value="pending">Pendente</option><option value="scheduled">Agendado</option><option value="in_progress">Em curso</option><option value="completed">Concluído</option><option value="cancelled">Cancelado</option></select></div></div>)}</div></div>

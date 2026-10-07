@@ -272,8 +272,6 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
           <label>Início<input type="datetime-local" value={isoToLocalInput(data.scheduled_start)} onChange={e=>setData({...data,scheduled_start:e.target.value})}/></label>
           <label>Fim<input type="datetime-local" value={isoToLocalInput(data.scheduled_end)} onChange={e=>setData({...data,scheduled_end:e.target.value})}/></label>
           <label className="span2">Descrição<textarea value={data.description||""} onChange={e=>setData({...data,description:e.target.value})}/></label>
-          <label className="check"><input type="checkbox" checked={!!data.billable} onChange={e=>setData({...data,billable:e.target.checked})}/> A faturar</label>
-          <label>Valor<input type="number" step="0.01" value={data.amount??""} onChange={e=>setData({...data,amount:e.target.value})}/></label>
           <label className="check"><input type="checkbox" checked={!!data.invoiced} disabled={data.status!=="completed"} onChange={e=>setData({...data,invoiced:e.target.checked})}/> Faturado</label>
           <label>Referência fatura<input value={data.invoice_reference||""} onChange={e=>setData({...data,invoice_reference:e.target.value})}/></label>
   <label className="span2">Notas<textarea value={data.notes||""} onChange={e=>setData({...data,notes:e.target.value})}/></label>

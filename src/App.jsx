@@ -16,6 +16,7 @@ const SERVICE_BASES = [
 
   const nav = [
   ["/kanban", "Kanban", CircleDot],
+  ["/clientes", "Clientes", Users],
   ["/calendario", "Calendário", CalendarDays],
   ];
 

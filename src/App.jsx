@@ -227,7 +227,12 @@ function ServiceTable({rows=[],onSelect}) {
     {!rows.length && <tr><td colSpan="5" className="empty">Sem serviços.</td></tr>}
   </tbody></table></div>
 }
-function Status({s}) { const map={pending:["Pendente","gray"],scheduled:["Agendado","blue"],in_progress:["Em curso","orange"],completed:["Concluído","green"],invoiced:["Faturado","purple"],cancelled:["Cancelado","red"]}; const [t,c]=map[s]||[s,"gray"]; return <span className={`status ${c}`}>{t}</span> }
+  function Status({s}) { const map={pending:["Pendente","gray"],scheduled:["Agendado","blue"],in_progress:["Em curso","orange"],completed:["Concluído","green"],invoiced:["Faturado","purple"],cancelled:["Cancelado","red"]}; const [t,c]=map[s]||[s,"gray"]; return <span className={`status ${c}`}>{t}</span> }
+  async function promoteDueServices(workspaceId){
+    if(!workspaceId)return;
+    await supabase.from("services").update({status:"in_progress"}).eq("workspace_id",workspaceId).eq("status","scheduled").not("scheduled_start","is",null).lte("scheduled_start",new Date().toISOString());
+  }
+
 
 function ServiceDetail({service, workspace, close, setRefresh}) {
   const [data,setData]=useState(service);
@@ -604,6 +609,7 @@ function Services({workspace, setRefresh}) {
   const [form,setForm]=useState(blank);
   async function load(){
     if(!workspace?.id)return;
+    await promoteDueServices(workspace.id);
     const [a,b,c]=await Promise.all([
       supabase.from("service_board").select("*").eq("workspace_id",workspace.id).order("scheduled_start",{ascending:true,nullsFirst:false}).order("created_at",{ascending:false}),
       // Use the complete client row: older databases may not have optional coordinate columns.
@@ -618,6 +624,7 @@ function Services({workspace, setRefresh}) {
     setTechs(c.data||[]);
   }
   useEffect(()=>{load()},[workspace?.id]);
+  useEffect(()=>{if(!workspace?.id)return;const timer=setInterval(()=>{promoteDueServices(workspace.id).then(load)},30000);return()=>clearInterval(timer)},[workspace?.id]);
   useEffect(()=>{if(!workspace?.id)return;const ch=supabase.channel("services-live-list").on("postgres_changes",{event:"*",schema:"public",table:"services",filter:`workspace_id=eq.${workspace.id}`},load).subscribe();return()=>supabase.removeChannel(ch)},[workspace?.id]);
   const filtered=rows.filter(r=>(status==="all"||r.board_status===status)&&((r.client_name||"")+" "+(r.title||"")+" "+(r.technician_name||"")).toLowerCase().includes(q.toLowerCase()));
   const selectedClient=clients.find(client=>String(client.id)===String(form.client_id));
@@ -788,6 +795,7 @@ function Calendar({workspace,refresh,setRefresh}) {
   const weekLabel=`Semana ${isoWeek(weekStart)} · ${weekStart.toLocaleDateString("pt-PT",{day:"2-digit",month:"short"})} – ${days[days.length-1]?.toLocaleDateString("pt-PT",{day:"2-digit",month:"short",year:"numeric"})}`;
   async function load(){
     if(!workspace?.id)return;
+    await promoteDueServices(workspace.id);
     setLoading(true);
     const from=iso(days[0]); const queryEnd=new Date(days[days.length-1]); queryEnd.setDate(queryEnd.getDate()+1); const to=iso(queryEnd);
     const [s,t,a,c]=await Promise.all([
@@ -804,6 +812,7 @@ function Calendar({workspace,refresh,setRefresh}) {
     setTechs(t.data||[]);setAvailability(a.data||[]);setLoading(false);
   }
   useEffect(()=>{load()},[workspace?.id,weekStart.toISOString(),refresh]);
+  useEffect(()=>{if(!workspace?.id)return;const timer=setInterval(()=>{promoteDueServices(workspace.id).then(load)},30000);return()=>clearInterval(timer)},[workspace?.id,weekStart.toISOString()]);
   useEffect(()=>{const open=e=>setDetail(e.detail);window.addEventListener("open-service",open);return()=>window.removeEventListener("open-service",open)},[]);
   function servicesFor(techId,date){return services.filter(x=>String(x.technician_id)===String(techId)&&localDateKey(x.scheduled_start)===iso(date))}
   function unavailable(techId,date){const a=availability.find(x=>String(x.technician_id)===String(techId)&&String(x.availability_date).slice(0,10)===iso(date));return a?.start_time==null&&a?.end_time==null?a:null}
@@ -822,7 +831,7 @@ function Calendar({workspace,refresh,setRefresh}) {
     <div className="calendar-toolbar"><div><span className="eyebrow">Planeamento</span><strong>{weekLabel}</strong></div><div className="calendar-controls"><label>Técnico<select value={filterTech} onChange={e=>setFilterTech(e.target.value)}><option value="all">Todos os técnicos</option>{techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><span className="calendar-count">{services.length} {services.length===1?"serviço agendado":"serviços agendados"}</span></div></div>
        <div className="panel calendar-board">
       <div className="calendar-grid-header"><div className="day-label-cell">Data</div>{techs.filter(t=>filterTech==="all"||String(t.id)===String(filterTech)).map(t=><div key={t.id} className="tech-head"><span className="tech-avatar">{t.name.slice(0,1).toUpperCase()}</span><strong>{t.name}</strong></div>)}</div>
-      {loading?<Loading/>:days.map(d=><div className="calendar-grid-row" key={iso(d)}><div className={`day-head ${iso(d)===iso(new Date())?"today":""}`}><strong>{d.toLocaleDateString("pt-PT",{weekday:"short"})}</strong><span>{d.getDate().toString().padStart(2,"0")}/{(d.getMonth()+1).toString().padStart(2,"0")}</span></div>{techs.filter(t=>filterTech==="all"||String(t.id)===String(filterTech)).map(t=>{const items=servicesFor(t.id,d),off=unavailable(t.id,d);return <div key={t.id} className={`day-cell ${off?"day-off":""}`} title={off?.reason||""} onDragOver={e=>e.preventDefault()} onDrop={()=>moveService(window.__calendarDragService,t.id,d)}>{off?<div className="off-label">INDISPONÍVEL{off.reason?` • ${off.reason}`:""}</div>:items.map(x=><div className="cal-card" key={x.id} draggable onDragStart={()=>{window.__calendarDragService=x}} onClick={()=>window.dispatchEvent(new CustomEvent("open-service",{detail:x}))}><strong>{x.client_name}</strong><span>{x.scheduled_start?new Date(x.scheduled_start).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}):"—"} · {x.title}</span>{x.billable&&<b>€ {Number(x.amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</b>}</div>)}{!off&&!items.length&&<span className="empty-slot">—</span>}</div>})}</div>)}
+      {loading?<Loading/>:days.map(d=><div className="calendar-grid-row" key={iso(d)}><div className={`day-head ${iso(d)===iso(new Date())?"today":""}`}><strong>{d.toLocaleDateString("pt-PT",{weekday:"short"})}</strong><span>{d.getDate().toString().padStart(2,"0")}/{(d.getMonth()+1).toString().padStart(2,"0")}</span></div>{techs.filter(t=>filterTech==="all"||String(t.id)===String(filterTech)).map(t=>{const items=servicesFor(t.id,d),off=unavailable(t.id,d);return <div key={t.id} className={`day-cell ${off?"day-off":""}`} title={off?.reason||""} onDragOver={e=>e.preventDefault()} onDrop={()=>moveService(window.__calendarDragService,t.id,d)}>{off?<div className="off-label">INDISPONÍVEL{off.reason?` • ${off.reason}`:""}</div>:items.map(x=><div className={`cal-card status-${x.invoiced&&x.status==="completed"?"invoiced":x.status||"pending"}`} key={x.id} draggable onDragStart={()=>{window.__calendarDragService=x}} onClick={()=>window.dispatchEvent(new CustomEvent("open-service",{detail:x}))}><strong>{x.client_name}</strong><span>{x.scheduled_start?new Date(x.scheduled_start).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}):"—"} · {x.title}</span>{x.billable&&<b>€ {Number(x.amount||0).toLocaleString("pt-PT",{minimumFractionDigits:2})}</b>}</div>)}{!off&&!items.length&&<span className="empty-slot">—</span>}</div>})}</div>)}
     </div>
     {detail&&<ServiceDetail service={detail} workspace={workspace} close={()=>setDetail(null)} setRefresh={setRefresh}/>} 
   </div>

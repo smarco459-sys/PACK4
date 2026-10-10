@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { read, utils } from "xlsx";
 import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
@@ -694,7 +695,8 @@ function AddressAutocomplete({value,onChange,placeholder="Rua, número, localida
 }
 
 function Clients({workspace,setRefresh}) {
-  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState(""),[editing,setEditing]=useState(null),[busy,setBusy]=useState(false),[profile,setProfile]=useState(null),[profileServices,setProfileServices]=useState([]),[profileHistory,setProfileHistory]=useState([]),[profileActivity,setProfileActivity]=useState([]);
+  const [rows,setRows]=useState([]),[open,setOpen]=useState(false),[q,setQ]=useState(""),[editing,setEditing]=useState(null),[busy,setBusy]=useState(false),[profile,setProfile]=useState(null),[profileServices,setProfileServices]=useState([]),[profileHistory,setProfileHistory]=useState([]),[profileActivity,setProfileActivity]=useState([]),[importing,setImporting]=useState(false);
+  const importInputRef=useRef(null);
   const emptyClient={name:"",contact_name:"",phone:"",email:"",address:"",postal_code:"",city:"",notes:""};
   const [form,setForm]=useState(emptyClient);
   async function load(){if(!workspace?.id)return; const {data}=await supabase.from("clients").select("*").eq("workspace_id",workspace.id).order("name");setRows(data||[])}
@@ -713,10 +715,41 @@ function Clients({workspace,setRefresh}) {
     if(error) return alert(error.message); load(); setRefresh?.(x=>x+1);
   }
   function editClient(client){setEditing(client);setForm({...emptyClient,...client});setOpen(true)}
+  function normalizeHeader(value){return String(value||"").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"")}
+  function valueFrom(row,keys){const normalizedKeys=keys.map(normalizeHeader);const entry=Object.entries(row).find(([key])=>normalizedKeys.includes(normalizeHeader(key)));return entry?.[1]??""}
+  async function importClients(event){
+    const file=event.target.files?.[0];
+    event.target.value="";
+    if(!file)return;
+    setImporting(true);
+    try{
+      const workbook=read(await file.arrayBuffer(),{cellDates:true});
+      const sheet=workbook.Sheets[workbook.SheetNames[0]];
+      const sourceRows=utils.sheet_to_json(sheet,{defval:""});
+      const rejectedMarkers=["*","#","nao usar","não usar","incorreto","errado"];
+      const clients=sourceRows.map(row=>({
+        name:String(valueFrom(row,["nome","name","cliente","client"])) .trim(),
+        contact_name:String(valueFrom(row,["contacto","contato","pessoadecontacto","contactname"])) .trim(),
+        phone:String(valueFrom(row,["telefone","telemovel","telemóvel","phone"])) .trim(),
+        email:String(valueFrom(row,["email","e-mail"])) .trim(),
+        address:String(valueFrom(row,["morada","endereco","endereço","address"])) .trim(),
+        postal_code:String(valueFrom(row,["codigopostal","postalcode","zip"])) .trim(),
+        city:String(valueFrom(row,["cidade","localidade","city"])) .trim(),
+        notes:String(valueFrom(row,["notas","notes","observacoes","observações"])) .trim(),
+        workspace_id:workspace.id
+      })).filter(client=>client.name&&!rejectedMarkers.some(marker=>client.name.toLocaleLowerCase("pt-PT").includes(marker)));
+      if(!clients.length){alert("Não foram encontrados clientes válidos para importar.");return;}
+      const {error}=await supabase.from("clients").insert(clients);
+      if(error)throw error;
+      await load();
+      setRefresh?.(x=>x+1);
+      alert(`${clients.length} cliente${clients.length===1?"":"s"} importado${clients.length===1?"":"s"}.`);
+    }catch(error){alert(`Não foi possível importar o Excel: ${error.message}`)}finally{setImporting(false)}
+  }
   async function openProfile(client){setProfile(client);const {data}=await supabase.from("service_board").select("*").eq("workspace_id",workspace.id).eq("client_id",client.id).order("scheduled_start",{ascending:false});const services=data||[];setProfileServices(services);const {data:history}=services.length?await supabase.from("service_history").select("id,service_id,action,old_status,new_status,notes,created_at").in("service_id",services.map(item=>item.id)).order("created_at",{ascending:false}):{data:[]};const serviceDates=new Map(services.map(service=>[service.id,service.scheduled_start||service.created_at]));const serviceEvents=services.map(service=>({id:`created-${service.id}`,type:"service_created",service_id:service.id,title:service.title,created_at:serviceDates.get(service.id)}));const activity=[{id:`client-${client.id}`,type:"client_created",created_at:client.created_at,title:client.name},...serviceEvents,...(history||[]).map(item=>({...item,type:item.action,created_at:serviceDates.get(item.service_id)||item.created_at}))].filter(item=>item.created_at).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));setProfileHistory(history||[]);setProfileActivity(activity)}
   const f=rows.filter(x=>(x.name+" "+(x.city||"")+" "+(x.phone||"")).toLowerCase().includes(q.toLowerCase()));
   function maps(c){const query=[c.address,c.postal_code,c.city].filter(Boolean).join(", ");return query?`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`:null}
-  return <div><Header title="Clientes" subtitle="Clientes, contactos, moradas e localização" action={<button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo cliente</button>}/>
+  return <div><Header title="Clientes" subtitle="Clientes, contactos, moradas e localização" action={<div className="header-actions"><input ref={importInputRef} type="file" accept=".xlsx,.csv" onChange={importClients} hidden/><button className="ghost" onClick={()=>importInputRef.current?.click()} disabled={importing}><FileSpreadsheet size={16}/> {importing?"A importar…":"Importar Excel"}</button><button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Novo cliente</button></div>}/>
     <div className="toolbar"><div className="search"><Search size={17}/><input placeholder="Pesquisar cliente…" value={q} onChange={e=>setQ(e.target.value)}/></div></div>
     <div className="panel"><div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Contacto</th><th>Telefone</th><th>Cidade</th><th>Morada</th><th>Mapa</th><th aria-label="Ações"></th></tr></thead><tbody>{f.map(c=><tr key={c.id} onClick={()=>openProfile(c)} className="click-row"><td><strong>{c.name}</strong></td><td>{c.contact_name||"—"}</td><td>{c.phone||"—"}</td><td>{c.city||"—"}</td><td>{c.address||"—"}</td><td>{maps(c)?<a className="table-link" href={maps(c)} target="_blank" rel="noreferrer">Abrir mapa</a>:"—"}</td><td><div className="row-actions"><button className="icon-btn small" aria-label={`Editar ${c.name}`} onClick={()=>editClient(c)}><Pencil size={14}/></button><button className="icon-btn small danger-icon" aria-label={`Eliminar ${c.name}`} onClick={()=>removeClient(c)} disabled={busy}><Trash2 size={14}/></button></div></td></tr>)}{!f.length&&<tr><td colSpan="7" className="empty">Sem clientes.</td></tr>}</tbody></table></div></div>
     {open&&<Modal title={editing?"Editar cliente":"Novo cliente"} close={()=>{setOpen(false);setEditing(null);setForm(emptyClient)}}><form onSubmit={save} className="form-grid client-form"><div className="form-section-heading span2"><span className="form-section-icon"><Users size={16}/></span><div><strong>Dados do cliente</strong><small>Identificação e contactos principais</small></div></div>{["name","contact_name","phone","email","address","postal_code","city"].map(k=><label key={k}>{({name:"Nome completo",contact_name:"Pessoa de contacto",phone:"Telefone",email:"Email",address:"Morada",postal_code:"Código postal",city:"Cidade"})[k]}{k==="address"?<AddressAutocomplete value={form.address} onChange={next=>setForm(current=>({...current,...next}))}/>:<input required={k==="name"} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/>}</label>)}<label className="span2">Notas internas<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><div className="modal-actions span2"><button type="button" className="ghost" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary" disabled={busy}>{busy?"A guardar…":editing?"Guardar alterações":"Criar cliente"}</button></div></form></Modal>}

@@ -909,7 +909,11 @@ function SettingsPage({session,workspace,onRefresh}) {
   return <div><Header title="Definições" subtitle="Conta, workspace e integrações"/><div className="grid-2"><div className="panel"><h2>Conta</h2><div className="setting"><span>Email</span><strong>{session.user.email}</strong></div><div className="setting"><span>Workspace</span><strong>{workspace?.name||"Sem workspace atribuído"}</strong></div><div className="setting"><span>Permissão</span><strong>{workspace?.role||"—"}</strong></div></div><div className="panel"><h2>Integrações</h2><div className="integration"><b>Google Sheets</b><span>Preparado para sincronização de leitura, sem alterar a folha original.</span></div><div className="integration"><b>Google Maps</b><span>Preparado para clientes com coordenadas.</span></div><div className="integration"><b>PHC</b><span>Integração futura.</span></div><div className="integration"><b>Supabase Auth</b><span className="status green">Ligado</span></div></div></div></div>
 }
 
-export default function App({session}) {
+function Booking() {
+  return <main className="public-booking"><section className="public-booking-card"><div className="brand-large">SaaS <span>Marcações</span></div><p className="brand-sub">GESTÃO DE AGENDAMENTOS</p><div className="public-booking-intro"><span className="eyebrow">Marcação online</span><h1>Escolha o serviço e o horário</h1><p>O fluxo público de marcações estará disponível aqui para os seus clientes.</p></div><div className="public-booking-placeholder"><CalendarDays size={22}/><span>Agenda de marcações</span><small>Selecione um colaborador, serviço, data e horário.</small></div><a className="ghost" href="/">Aceder à gestão</a></section></main>;
+}
+
+  export default function App({session}) {
   if (!session) return <Routes><Route path="/marcacao" element={<Booking/>}/><Route path="*" element={<Login/>}/></Routes>;
   return <Shell session={session}/>;
 }

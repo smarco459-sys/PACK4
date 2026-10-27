@@ -16,9 +16,10 @@ const SERVICE_BASES = [
 ];
 
   const nav = [
-  ["/kanban", "Kanban", CircleDot],
+  ["/calendario", "Agenda", CalendarDays],
+  ["/colaboradores", "Colaboradores", UserRoundCog],
+  ["/servicos", "Serviços", Package],
   ["/clientes", "Clientes", Users],
-  ["/calendario", "Calendário", CalendarDays],
   ];
 
 function Login() {
@@ -909,6 +910,6 @@ function SettingsPage({session,workspace,onRefresh}) {
 }
 
 export default function App({session}) {
-  if (!session) return <Routes><Route path="*" element={<Login/>}/></Routes>;
+  if (!session) return <Routes><Route path="/marcacao" element={<Booking/>}/><Route path="*" element={<Login/>}/></Routes>;
   return <Shell session={session}/>;
 }

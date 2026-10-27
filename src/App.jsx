@@ -48,10 +48,10 @@ function Login() {
 
   return <div className="login-shell">
     <div className="login-card">
-      <div className="brand-large">PACK<span>4</span></div>
-      <div className="brand-sub">SERVICE MANAGER</div>
-      <h1>Entrar</h1>
-      <p className="muted">Acesso ao departamento técnico</p>
+<div className="brand-large">SaaS <span>Marcações</span></div>
+  <div className="brand-sub">GESTÃO DE AGENDAMENTOS</div>
+  <h1>Entrar</h1>
+  <p className="muted">Acesso à agenda</p>
       <form onSubmit={submit}>
         <label>Email<input name="email" type="email" autoComplete="email" inputMode="email" value={email} onChange={e=>setEmail(e.target.value)} required /></label>
         <label>Password<input name="password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required /></label>
@@ -114,7 +114,7 @@ function Shell({ session }) {
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="logo">PACK<span>4</span><small>SERVICE MANAGER</small></div>
+      <div className="logo">SaaS <span>Marcações</span><small>GESTÃO DE AGENDAMENTOS</small></div>
       <div className="live"><i/> DADOS EM TEMPO REAL</div>
       <nav>{nav.map(([to,label,Icon]) =>
         <NavLink key={to} to={to} end={to==="/"} className={({isActive})=>isActive?"active":""}>
@@ -307,7 +307,7 @@ function ServiceDetail({service, workspace, close, setRefresh}) {
       </section>
       <aside className="detail-side">
         <div className="detail-box"><h3>Cliente</h3><strong>{client?.name||service.client_name||"—"}</strong><p>{client?.contact_name||""}</p><p>{client?.phone||""}</p><p>{client?.email||""}</p><p>{client?.address||""}{client?.city?`, ${client.city}`:""}</p></div>
-        <div className="detail-box"><h3>Histórico de atividade</h3>{history.map(h=>{const labels={status_change:"Alterou estado",technician_change:"Alterou técnico",part_added:"Adicionou peça",part_removed:"Removeu peça",service_created:"Criou serviço",service_updated:"Atualizou serviço"};const action=labels[h.action]||h.action||"Atividade";const transition=h.action==="status_change"?`${h.old_status||"—"} → ${h.new_status||"—"}`:h.notes;return <div className="history-row" key={h.id}><div><strong>{action}</strong>{transition&&<span>{transition}</span>}</div><small>{new Date(h.created_at).toLocaleString("pt-PT")}</small></div>})}{!history.length&&<div className="muted small-text">Sem alterações registadas.</div>}</div>
+        <div className="detail-box"><h3>Histórico de atividade</h3>{history.map(h=>{const labels={status_change:"Alterou estado",technician_change:"Alterou técnico",part_added:"Adicionou peça",part_removed:"Removeu peça",service_created:"Criou serviço",service_updated:"Atualizou serviço"};const action=labels[h.action]||h.action||"Atividade";const transition=h.action==="status_change"?`${h.old_status||"��"} → ${h.new_status||"—"}`:h.notes;return <div className="history-row" key={h.id}><div><strong>{action}</strong>{transition&&<span>{transition}</span>}</div><small>{new Date(h.created_at).toLocaleString("pt-PT")}</small></div>})}{!history.length&&<div className="muted small-text">Sem alterações registadas.</div>}</div>
       </aside>
     </div>
   </Modal>

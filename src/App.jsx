@@ -4,7 +4,7 @@ import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom"
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
   BarChart3, Settings, LogOut, Plus, Search, RefreshCw, Euro, Clock3,
-  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin, Navigation, Route as RouteIcon
+  CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin, Navigation, Route as RouteIcon, ShieldCheck, Building2, Database, Activity
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 
@@ -70,6 +70,7 @@ function Shell({ session }) {
   const [workspace, setWorkspace] = useState(null);
   const [refresh, setRefresh] = useState(0);
   const navigate = useNavigate();
+  const isMasterAdmin = session.user.email?.toLowerCase() === "smarco459@gmail.com";
 
   useEffect(() => {
     async function load() {
@@ -117,7 +118,7 @@ function Shell({ session }) {
     <aside className="sidebar">
       <div className="logo">SaaS <span>Marcações</span><small>GESTÃO DE AGENDAMENTOS</small></div>
       <div className="live"><i/> DADOS EM TEMPO REAL</div>
-      <nav>{nav.map(([to,label,Icon]) =>
+      <nav>{isMasterAdmin && <NavLink to="/master" className={({isActive})=>isActive?"active":""}><ShieldCheck size={18}/><span>Master Admin</span></NavLink>}{nav.map(([to,label,Icon]) =>
         <NavLink key={to} to={to} end={to==="/"} className={({isActive})=>isActive?"active":""}>
           <Icon size={18}/><span>{label}</span>
         </NavLink>
@@ -132,6 +133,7 @@ function Shell({ session }) {
     </aside>
     <main className="main">
       <Routes location={undefined} key={refresh}>
+        {isMasterAdmin && <Route path="/master" element={<MasterAdmin session={session}/>} />}
         <Route path="/" element={<Navigate to="/kanban" replace/>}/>
  <Route path="/dashboard" element={<Dashboard workspace={workspace}/>} />
  <Route path="/kanban" element={<Kanban workspace={workspace} setRefresh={setRefresh}/>} />
@@ -144,6 +146,13 @@ function Shell({ session }) {
       </Routes>
     </main>
   </div>;
+}
+
+function MasterAdmin({session}) {
+  const businesses=useData(async()=>{const {data,error}=await supabase.from("workspaces").select("id,name,created_at").order("created_at",{ascending:false});if(error)throw error;return data||[]},[]);
+  const rows=businesses.data||[];
+  const configured=rows.filter(x=>x.supabase_url||x.database_status==="connected").length;
+  return <div className="master-page"><Header title="Master Admin" subtitle="Controlo global da plataforma SaaS" action={<button className="primary"><Plus size={16}/> Adicionar negócio</button>}/><div className="master-banner"><ShieldCheck size={22}/><div><strong>Acesso proprietário</strong><span>{session.user.email} · painel global protegido</span></div><span className="status green">Sessão verificada</span></div><div className="master-kpis"><div className="master-kpi"><Building2 size={20}/><span>Negócios registados</span><strong>{businesses.loading?"—":rows.length}</strong></div><div className="master-kpi"><Activity size={20}/><span>Negócios ativos</span><strong>{businesses.loading?"—":rows.length}</strong></div><div className="master-kpi"><Database size={20}/><span>Bases configuradas</span><strong>{businesses.loading?"—":configured}</strong></div><div className="master-kpi warning"><AlertCircle size={20}/><span>Por configurar</span><strong>{businesses.loading?"—":rows.length-configured}</strong></div></div><section className="panel master-businesses"><div className="panel-head"><div><h2>Negócios</h2><p className="muted">Cada negócio terá uma base Supabase independente.</p></div><span className="status blue">Arquitetura multi-tenant</span></div><div className="table-wrap"><table><thead><tr><th>Negócio</th><th>ID interno</th><th>Estado</th><th>Base de dados</th><th>Última verificação</th><th>Ações</th></tr></thead><tbody>{businesses.loading?<tr><td colSpan="6"><Loading/></td></tr>:businesses.error?<tr><td colSpan="6"><ErrorBox e={businesses.error}/></td></tr>:rows.map(row=><tr key={row.id}><td><strong>{row.name}</strong></td><td><code>{String(row.id).slice(0,8)}</code></td><td><span className="status orange">Por configurar</span></td><td><span className="db-pending"><Database size={14}/> Supabase pendente</span></td><td>—</td><td><button className="ghost small">Abrir ficha</button></td></tr>)}{!businesses.loading&&!businesses.error&&!rows.length&&<tr><td colSpan="6" className="empty">Ainda não existem negócios registados.</td></tr>}</tbody></table></div></section><section className="master-next"><Database size={20}/><div><strong>Próximo passo: configurar bases independentes</strong><p>O painel está preparado para registar Negócio A, Negócio B e futuros negócios. As ligações Supabase ficam pendentes até os projetos serem fornecidos e validados.</p></div></section></div>
 }
 
 function Header({title, subtitle, action}) {

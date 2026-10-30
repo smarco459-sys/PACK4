@@ -135,15 +135,15 @@ function Shell({ session }) {
     <main className="main">
       <Routes location={undefined} key={refresh}>
         {isMasterAdmin && <Route path="/master" element={<MasterAdmin session={session}/>} />}
-        <Route path="/" element={<Navigate to="/kanban" replace/>}/>
+        <Route path="/" element={<Navigate to="/calendario" replace/>}/>
  <Route path="/dashboard" element={<Dashboard workspace={workspace}/>} />
- <Route path="/kanban" element={<Kanban workspace={workspace} setRefresh={setRefresh}/>} />
+ <Route path="/colaboradores" element={<Technicians workspace={workspace}/>} />
  <Route path="/servicos" element={<Services workspace={workspace} setRefresh={setRefresh}/>} />
  <Route path="/clientes" element={<Clients workspace={workspace} setRefresh={setRefresh}/>} />
  <Route path="/calendario" element={<Calendar workspace={workspace} refresh={refresh} setRefresh={setRefresh}/>} />
  <Route path="/relatorios" element={<Reports workspace={workspace}/>} />
  <Route path="/importar" element={<ImportCenter workspace={workspace} onRefresh={()=>setRefresh(x=>x+1)}/>} />
- <Route path="*" element={<Navigate to="/kanban" replace/>}/>
+ <Route path="*" element={<Navigate to="/calendario" replace/>}/>
       </Routes>
     </main>
   </div>;

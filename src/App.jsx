@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { read, utils } from "xlsx";
+import { QRCodeSVG } from "qrcode.react";
 import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wrench, CalendarDays, Users, UserRoundCog, Package,
@@ -913,7 +914,7 @@ function SettingsPage({session,workspace,onRefresh}) {
 }
 
 function Booking() {
-  return <main className="public-booking"><section className="public-booking-card"><div className="brand-large">SaaS <span>Marcações</span></div><p className="brand-sub">GESTÃO DE AGENDAMENTOS</p><div className="public-booking-intro"><span className="eyebrow">Marcação online</span><h1>Escolha o serviço e o horário</h1><p>O fluxo público de marcações estará disponível aqui para os seus clientes.</p></div><div className="public-booking-placeholder"><CalendarDays size={22}/><span>Agenda de marcações</span><small>Selecione um colaborador, serviço, data e horário.</small></div><a className="ghost" href="/">Aceder à gestão</a></section></main>;
+  return <main className="public-booking"><section className="public-booking-card"><div className="brand-large">SaaS <span>Marcações</span></div><p className="brand-sub">GESTÃO DE AGENDAMENTOS</p><div className="public-booking-intro"><span className="eyebrow">Marcação online</span><h1>Escolha o serviço e o horário</h1><p>O fluxo público de marcações estará disponível aqui para os seus clientes.</p></div><div className="public-booking-placeholder"><CalendarDays size={22}/><span>Agenda de marcações</span><small>Selecione um colaborador, serviço, data e horário.</small></div><div className="booking-install"><QRCodeSVG value={`${window.location.origin}/marcacao`} size={132} includeMargin bgColor="#ffffff" fgColor="#122746"/><div><strong>Acesso rápido para clientes</strong><p>Leia este QR code com a câmara do telemóvel para abrir a marcação online. Depois pode adicionar a app ao ecrã inicial.</p><small className="install-hint">No telemóvel, escolha “Adicionar ao ecrã inicial” no menu do browser.</small></div></div><a className="ghost" href="/">Aceder à gestão</a></section></main>;
 }
 
   export default function App({session}) {

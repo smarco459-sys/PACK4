@@ -1,0 +1,11 @@
+{
+  "name": "SaaS Marcações - Esteticista",
+  "short_name": "Marcações",
+  "description": "Marcação online para serviços de estética",
+  "start_url": "/marcacao",
+  "display": "standalone",
+  "background_color": "#f7faff",
+  "theme_color": "#122746",
+  "lang": "pt-PT",
+  "icons": []
+}

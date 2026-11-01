@@ -13,10 +13,12 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "^6.3.289",
+    "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.9.1",
+    "resend": "^6.35.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {

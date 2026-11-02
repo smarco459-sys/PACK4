@@ -3,11 +3,14 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.js",
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "desktop": "vite --host 0.0.0.0",
+    "desktop:dist": "vite build && electron-builder --config electron-builder.config.cjs --win"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
@@ -24,6 +27,8 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.4",
     "vite": "^7.1.7"
   }
 }

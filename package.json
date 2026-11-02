@@ -22,11 +22,6 @@
     "resend": "^6.35.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.4",
     "vite": "^7.1.7"

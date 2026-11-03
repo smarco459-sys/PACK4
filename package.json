@@ -1,5 +1,7 @@
 {
   "name": "pack4-service-manager",
+  "description": "SaaS Esteticista — gestão de clientes, serviços e agendas.",
+  "author": "SaaS Esteticista",
   "private": true,
   "version": "1.0.0",
   "type": "module",

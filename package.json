@@ -12,7 +12,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "desktop": "vite --host 0.0.0.0",
-    "desktop:dist": "vite build && electron-builder --config electron-builder.config.cjs --win"
+    "desktop:dist": "vite build && electron-builder --config electron-builder.config.cjs --win --publish never"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",

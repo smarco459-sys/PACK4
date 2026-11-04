@@ -3,6 +3,8 @@ name: Windows installer
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "v0/correcao-de-texto-32f915de"
     tags:
       - "v*"
 

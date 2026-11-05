@@ -1,10 +1,4 @@
 import { app, BrowserWindow, shell } from "electron"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
@@ -20,7 +14,8 @@ function createWindow() {
     },
   })
 
-  window.loadFile(path.join(__dirname, "..", "dist", "index.html"))
+  const productionUrl = process.env.SAAS_WEB_URL || "https://saas-1uk4ubrza-smarco459-2827s-projects.vercel.app"
+  window.loadURL(productionUrl)
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url)
     return { action: "deny" }

@@ -8,6 +8,7 @@ import {
   CheckCircle2, AlertCircle, CircleDot, X, ChevronRight, Pencil, Trash2, Upload, FileSpreadsheet, FileText, Download, MapPin, Navigation, Route as RouteIcon, ShieldCheck, Building2, Database, Activity
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
+import { Button } from "./components/ui/button";
 
 const HOURLY_RATE = 75;
 const DISTANCE_RATE = 0.75;
@@ -59,7 +60,7 @@ function Login() {
         <label>Password<input name="password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required /></label>
         {error && <div className="alert danger">{error}</div>}
         {sent && <div className="alert success">Email de recuperação enviado.</div>}
-        <button className="primary wide" disabled={busy}>{busy ? "A entrar..." : "Entrar"}</button>
+        <Button type="submit" className="primary wide" disabled={busy}>{busy ? "A entrar..." : "Entrar"}</Button>
       </form>
       <button className="link-btn" onClick={reset} disabled={busy}>Esqueci-me da password</button>
     </div>

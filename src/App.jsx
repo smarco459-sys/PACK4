@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { Button } from "./components/ui/button";
+import GeminiDiagnostics from "./components/GeminiDiagnostics";
 
 const HOURLY_RATE = 75;
 const DISTANCE_RATE = 0.75;
@@ -217,6 +218,7 @@ function Dashboard({workspace}) {
   <Kpi icon={CheckCircle2} label="Concluídos" value={m.data?.completed_services ?? "—"}/>
   <Kpi icon={Euro} label="A faturar" value={m.data?.to_invoice_amount != null ? money(m.data.to_invoice_amount) : "—"}/>
   </div>
+  <GeminiDiagnostics workspaceId={workspace?.id} stats={{pending:m.data?.pending_services,scheduled:m.data?.scheduled_services,overdue}}/>
   <section className="dashboard-section operations-today"><div className="section-heading"><div><span className="eyebrow">Resumo operacional</span><h2>Operação do dia</h2></div><span className="live-status"><i/>Atualizado em tempo real</span></div><div className="manager-metrics"><Metric label="Serviços hoje" value={today.length}/><Metric label="Colaboradores ocupados" value={busyTechnicians}/><Metric label="Colaboradores disponíveis" value={Math.max(0,(technicians.data||[]).length-busyTechnicians)}/><Metric label="Serviços atrasados" value={overdue} tone={overdue>0?"danger":"good"}/></div></section>
   <section className="dashboard-section"><div className="section-heading"><div><span className="eyebrow">Financeiro</span><h2>Visão financeira</h2></div></div><div className="manager-metrics financial"><Metric label="€ faturados" value={money(billed)}/><Metric label="€ em concluídos" value={money(completedValue)}/><Metric label="Valor médio / serviço" value={money(averageValue)}/></div></section>
   <div className="grid-2">

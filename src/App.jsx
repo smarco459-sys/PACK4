@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { read, utils } from "xlsx";
 import { QRCodeSVG } from "qrcode.react";
 import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import {
@@ -117,8 +116,9 @@ function Shell({ session }) {
     navigate("/login");
   }
 
-  return <div className="app-shell">
-    <aside className="sidebar">
+ return <div className="app-shell">
+  <a className="skip-link" href="#main-content">Saltar para o conteúdo</a>
+  <aside className="sidebar">
       <div className="logo">SaaS <span>Marcações</span><small>GESTÃO DE AGENDAMENTOS</small></div>
       <nav>{isMasterAdmin && <NavLink to="/master" className={({isActive})=>isActive?"active":""}><ShieldCheck size={18}/><span>Master Admin</span></NavLink>}{nav.map(([to,label,Icon]) =>
         <NavLink key={to} to={to} end={to==="/"} className={({isActive})=>isActive?"active":""}>
@@ -133,7 +133,7 @@ function Shell({ session }) {
         <button className="ghost wide" onClick={logout}><LogOut size={16}/> Sair</button>
       </div>
     </aside>
-    <main className="main">
+    <main id="main-content" className="main">
       <Routes location={undefined} key={refresh}>
         {isMasterAdmin && <Route path="/master" element={<MasterAdmin session={session}/>} />}
         <Route path="/" element={<Navigate to="/calendario" replace/>}/>
@@ -738,6 +738,7 @@ function Clients({workspace,setRefresh}) {
     if(!file)return;
     setImporting(true);
     try{
+      const { read, utils } = await import("xlsx");
       const workbook=read(await file.arrayBuffer(),{cellDates:true});
       const sheet=workbook.Sheets[workbook.SheetNames[0]];
       const sourceRows=utils.sheet_to_json(sheet,{defval:""});

@@ -197,3 +197,19 @@ html{font-size:clamp(14px,calc(13px + .2vw),17px);overflow-x:hidden}img,svg,vide
     @apply bg-background text-foreground;}
   html {
     @apply font-sans;}}
+
+/* Final glassmorphism layer */
+body .login-shell,body .booking-shell{position:relative;isolation:isolate;overflow:hidden;background:radial-gradient(circle at 12% 12%,rgba(255,255,255,.95) 0,transparent 30%),radial-gradient(circle at 88% 84%,rgba(181,211,255,.8) 0,transparent 34%),linear-gradient(135deg,#eef4ff 0%,#f8fbff 52%,#e8f0fb 100%)!important}
+body .login-shell::before,body .booking-shell::before{content:"";position:absolute;inset:-20%;z-index:-1;background:linear-gradient(120deg,transparent 28%,rgba(255,255,255,.5) 48%,transparent 68%);transform:rotate(-8deg);pointer-events:none}
+body .login-card,body .booking-card,body .public-booking-card{background:rgba(255,255,255,.62)!important;border:1px solid rgba(255,255,255,.82)!important;box-shadow:0 30px 80px rgba(41,70,112,.18),inset 0 1px rgba(255,255,255,.9)!important;backdrop-filter:blur(24px) saturate(145%);-webkit-backdrop-filter:blur(24px) saturate(145%)}
+body .brand-large{color:#000!important;text-shadow:0 1px rgba(255,255,255,.7)}
+body .brand-large span{color:#151515!important}
+body .brand-sub{color:#52657d!important}
+body .login-card h1{color:#0b0d12!important}
+body .login-card .muted{color:#536276!important}
+body .login-card input,body .booking-card input{background:rgba(255,255,255,.72)!important;border-color:rgba(129,151,180,.32)!important;box-shadow:inset 0 1px rgba(255,255,255,.85)}
+body .login-card input:focus,body .booking-card input:focus{background:rgba(255,255,255,.94)!important;box-shadow:0 0 0 4px rgba(61,117,209,.12),inset 0 1px rgba(255,255,255,.9)!important}
+body .panel,body .dashboard-section,body .gemini-panel,body .kpi,body .toolbar{background:rgba(255,255,255,.76)!important;border-color:rgba(161,177,201,.42)!important;box-shadow:0 14px 34px rgba(31,53,82,.07),inset 0 1px rgba(255,255,255,.92)!important;backdrop-filter:blur(14px) saturate(125%);-webkit-backdrop-filter:blur(14px) saturate(125%)}
+body .sidebar{background:rgba(255,255,255,.78)!important;border-right-color:rgba(161,177,201,.42)!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+@media(max-width:760px){body .sidebar{background:rgba(255,255,255,.86)!important}}
+@media(prefers-reduced-transparency:reduce){body .login-card,body .booking-card,body .public-booking-card,body .panel,body .dashboard-section,body .gemini-panel,body .kpi,body .toolbar,body .sidebar{backdrop-filter:none;-webkit-backdrop-filter:none;background:#fff!important}}

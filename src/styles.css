@@ -214,6 +214,14 @@ body .sidebar{background:rgba(255,255,255,.78)!important;border-right-color:rgba
 @media(max-width:760px){body .sidebar{background:rgba(255,255,255,.86)!important}}
 @media(prefers-reduced-transparency:reduce){body .login-card,body .booking-card,body .public-booking-card,body .panel,body .dashboard-section,body .gemini-panel,body .kpi,body .toolbar,body .sidebar{backdrop-filter:none;-webkit-backdrop-filter:none;background:#fff!important}}
 
+/* Modal alignment: keep the full form and actions inside the same grid */
+body .modal-back{align-items:flex-start;overflow:auto;padding:24px 20px}
+body .modal{margin:0 auto;max-height:calc(100dvh - 48px)}
+body .modal .form-grid>.span2,body .modal .form-grid>.modal-actions{grid-column:1/-1!important;width:100%}
+body .modal .modal-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin:26px 0 -28px!important;padding:16px 28px!important}
+body .modal .modal-actions .ghost{margin-right:auto}
+@media(max-width:600px){body .modal-back{padding:12px}body .modal{max-height:calc(100dvh - 24px)}body .modal .modal-actions{margin:22px 0 -20px!important;padding:14px 16px!important}}
+
 /* Navigation tabs: vertical, high-contrast and easy to scan */
 body .sidebar nav{display:flex;flex-direction:column;gap:7px}
 body .sidebar nav a{display:flex;align-items:center;gap:10px;background:#000!important;color:#fff!important;border:1px solid #000!important;border-radius:12px;box-shadow:none!important}

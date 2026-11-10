@@ -172,7 +172,7 @@ body .empty{min-height:120px;display:grid;place-items:center;text-align:center;c
  body .app-shell{display:flex;flex-direction:column}
  body .sidebar{position:sticky;top:0;width:100%;height:auto;min-height:0;padding:14px 14px 12px;border-right:0;border-bottom:1px solid #dedede;box-shadow:0 8px 24px rgba(0,0,0,.08)}
  body .logo{display:flex;align-items:baseline;gap:6px;font-size:20px;margin-bottom:12px}body .logo small{margin-left:auto;font-size:8px;letter-spacing:.1em}
- body .sidebar nav{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}body .sidebar nav::-webkit-scrollbar{display:none}body .sidebar nav a{flex:0 0 auto;padding:9px 11px;font-size:12px}body .sidebar nav a span{display:block}
+ body .sidebar nav{display:flex;flex-direction:column;gap:7px;overflow:visible;padding-bottom:2px}body .sidebar nav a{width:100%;display:flex;align-items:center;gap:9px;flex:0 0 auto;padding:11px 13px;font-size:12px;background:#000!important;color:#fff!important;border:1px solid #000!important;box-shadow:none!important}body .sidebar nav a:hover,body .sidebar nav a.active{background:#202020!important;color:#fff!important;border-color:#000!important;box-shadow:0 6px 14px rgba(0,0,0,.14)!important}body .sidebar nav a span{display:block}
  body .sidebar-bottom{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding-top:10px}body .user-mini{min-width:0}body .user-mini strong{max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}body .sidebar-bottom .wide{width:auto;padding-inline:12px}
  body .main{padding:22px 14px 36px}.skip-link{top:8px;left:8px}
 }
@@ -213,3 +213,8 @@ body .panel,body .dashboard-section,body .gemini-panel,body .kpi,body .toolbar{b
 body .sidebar{background:rgba(255,255,255,.78)!important;border-right-color:rgba(161,177,201,.42)!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
 @media(max-width:760px){body .sidebar{background:rgba(255,255,255,.86)!important}}
 @media(prefers-reduced-transparency:reduce){body .login-card,body .booking-card,body .public-booking-card,body .panel,body .dashboard-section,body .gemini-panel,body .kpi,body .toolbar,body .sidebar{backdrop-filter:none;-webkit-backdrop-filter:none;background:#fff!important}}
+
+/* Navigation tabs: vertical, high-contrast and easy to scan */
+body .sidebar nav{display:flex;flex-direction:column;gap:7px}
+body .sidebar nav a{display:flex;align-items:center;gap:10px;background:#000!important;color:#fff!important;border:1px solid #000!important;border-radius:12px;box-shadow:none!important}
+body .sidebar nav a:hover,body .sidebar nav a.active{background:#242424!important;color:#fff!important;border-color:#000!important;box-shadow:0 8px 18px rgba(0,0,0,.14)!important}

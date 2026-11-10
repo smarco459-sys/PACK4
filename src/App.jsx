@@ -119,7 +119,7 @@ function Shell({ session }) {
  return <div className="app-shell">
   <a className="skip-link" href="#main-content">Saltar para o conteúdo</a>
   <aside className="sidebar">
-      <div className="logo">SaaS <span>Marcações</span><small>GESTÃO DE AGENDAMENTOS</small></div>
+      <div className="logo">SaaS <span>Marcações</span></div>
       <nav>{isMasterAdmin && <NavLink to="/master" className={({isActive})=>isActive?"active":""}><ShieldCheck size={18}/><span>Master Admin</span></NavLink>}{nav.map(([to,label,Icon]) =>
         <NavLink key={to} to={to} end={to==="/"} className={({isActive})=>isActive?"active":""}>
           <Icon size={18}/><span>{label}</span>

@@ -130,7 +130,7 @@ function Shell({ session }) {
           <div className="avatar">{(profile?.full_name || session.user.email || "P").slice(0,1).toUpperCase()}</div>
           <div><strong>{profile?.full_name || session.user.email}</strong><small>{workspace?.role || "utilizador"}</small></div>
         </div>
-        <button className="ghost wide" onClick={logout}><LogOut size={16}/> Sair</button>
+        <button className="ghost logout-button" onClick={logout} aria-label="Sair da conta" title="Sair"><LogOut size={16}/></button>
       </div>
     </aside>
     <main id="main-content" className="main">

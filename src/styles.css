@@ -217,4 +217,10 @@ body .sidebar{background:rgba(255,255,255,.78)!important;border-right-color:rgba
 /* Navigation tabs: vertical, high-contrast and easy to scan */
 body .sidebar nav{display:flex;flex-direction:column;gap:7px}
 body .sidebar nav a{display:flex;align-items:center;gap:10px;background:#000!important;color:#fff!important;border:1px solid #000!important;border-radius:12px;box-shadow:none!important}
-body .sidebar nav a:hover,body .sidebar nav a.active{background:#242424!important;color:#fff!important;border-color:#000!important;box-shadow:0 8px 18px rgba(0,0,0,.14)!important}
+body .sidebar{background:#000!important;border-right:0!important;color:#fff!important;box-shadow:18px 0 40px rgba(0,0,0,.12)!important}
+body .sidebar .logo{color:#fff!important}body .sidebar .logo span{color:#fff!important}body .sidebar .logo small{color:#a9a9a9!important}
+body .sidebar nav a{background:#fff!important;color:#000!important;border:1px solid #fff!important;border-radius:14px;box-shadow:none!important}
+body .sidebar nav a svg{color:#000!important}body .sidebar nav a:hover,body .sidebar nav a.active{background:#e8e8e8!important;color:#000!important;border-color:#fff!important;box-shadow:0 8px 18px rgba(255,255,255,.12)!important}
+body .sidebar nav a:hover svg,body .sidebar nav a.active svg{color:#000!important}
+body .sidebar-bottom{border-top-color:#333!important}body .sidebar .user-mini strong{color:#fff!important}body .sidebar .user-mini small{color:#aaa!important}body .sidebar .avatar{background:#fff!important;color:#000!important}
+body .logout-button{display:grid!important;place-items:center;width:38px;height:38px;padding:0!important;border:1px solid #fff!important;border-radius:10px!important;color:#fff!important;background:transparent!important}.logout-button svg{color:#fff!important}.logout-button:hover{background:#fff!important;color:#000!important}.logout-button:hover svg{color:#000!important}

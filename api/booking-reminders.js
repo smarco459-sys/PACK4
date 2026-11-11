@@ -8,7 +8,7 @@ export default async function handler(request, response) {
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
   const resend = new Resend(process.env.RESEND_API_KEY)
   const now = new Date()
-  const from = process.env.RESEND_EMAIL_DOMAIN ? `SaaS Marcações <noreply@${process.env.RESEND_EMAIL_DOMAIN}>` : "SaaS Marcações <onboarding@resend.dev>"
+  const from = process.env.RESEND_EMAIL_DOMAIN ? `PACK4 <noreply@${process.env.RESEND_EMAIL_DOMAIN}>` : "PACK4 <onboarding@resend.dev>"
   const start = new Date(now.getTime() + 23 * 60 * 60 * 1000)
   const end = new Date(now.getTime() + 25 * 60 * 60 * 1000)
   const { data: bookings, error } = await supabase.from("services").select("id,client_id,title,scheduled_start,technician_id").gte("scheduled_start", start.toISOString()).lt("scheduled_start", end.toISOString()).not("status", "eq", "cancelled")

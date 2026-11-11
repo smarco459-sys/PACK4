@@ -1,6 +1,6 @@
 {
-  "name": "SaaS Marcações - Esteticista",
-  "short_name": "Marcações",
+  "name": "PACK4 | Gestão de Agendamentos",
+  "short_name": "PACK4",
   "description": "Marcação online para serviços de estética",
   "start_url": "/marcacao",
   "display": "standalone",

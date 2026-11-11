@@ -1,7 +1,7 @@
 module.exports = {
   appId: "pt.saas.esteticista",
-  productName: "SaaS Esteticista",
-  artifactName: "SaaS-Esteticista-Setup-${version}.${ext}",
+  productName: "PACK4",
+  artifactName: "PACK4-Setup-${version}.${ext}",
   directories: {
     output: "release",
   },
@@ -15,6 +15,6 @@ module.exports = {
     allowToChangeInstallationDirectory: true,
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    shortcutName: "SaaS Esteticista",
+    shortcutName: "PACK4",
   },
 }

@@ -1,6 +1,6 @@
-# PACK4-MANAGER
+# PACK4
 {
-  "name": "pack4-service-manager",
+  "name": "pack4",
   "private": true,
   "version": "1.0.0",
   "type": "module",

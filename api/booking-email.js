@@ -5,7 +5,7 @@ export default async function handler(request, response) {
   const { email, managerEmail, name, service, collaborator, date, time } = request.body || {};
   if (!email || !name || !service || !date || !time) return response.status(400).json({ error: "Dados de email incompletos" });
   const resend = new Resend(process.env.RESEND_API_KEY);
-  const from = `SaaS Marcações <noreply@${process.env.RESEND_EMAIL_DOMAIN || "resend.dev"}>`;
+  const from = `PACK4 <noreply@${process.env.RESEND_EMAIL_DOMAIN || "resend.dev"}>`;
   const { data, error } = await resend.emails.send({
     from,
     to: [email],

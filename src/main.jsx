@@ -5,13 +5,30 @@ import App from "./App.jsx";
 import "./styles.css";
 import { supabase } from "./lib/supabase";
 
+const PACK4_LOGO = "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Screenshot_20261112_222216_Chrome-o68zNU9vfGZ4vbZnYrsm6PLX8dM8U4.jpg";
+
+function StartupScreen() {
+  return (
+    <main className="startup-screen" aria-label="A iniciar PACK4">
+      <div className="startup-logo-frame"><img src={PACK4_LOGO} alt="PACK4 — Empowering Industry" /></div>
+      <span className="startup-progress" aria-hidden="true"><span /></span>
+    </main>
+  );
+}
+
 function Root() {
   const [session, setSession] = useState(undefined);
+  const [startupComplete, setStartupComplete] = useState(false);
   useEffect(() => {
+    const startupTimer = window.setTimeout(() => setStartupComplete(true), 2200);
     supabase.auth.getSession?.().then(({ data }) => setSession(data?.session ?? null)).catch(() => setSession(null));
     const result = supabase.auth.onAuthStateChange?.((_event, next) => setSession(next));
-    return () => result?.data?.subscription?.unsubscribe?.();
+    return () => {
+      window.clearTimeout(startupTimer);
+      result?.data?.subscription?.unsubscribe?.();
+    };
   }, []);
+  if (!startupComplete || session === undefined) return <StartupScreen />;
   return <App session={session} />;
 }
 

@@ -32,12 +32,9 @@ function Login() {
 
   return (
     <main className="login-screen">
-      <section className="login-brand-panel" aria-labelledby="login-brand-title">
-        <div className="sidebar-brand login-brand"><span className="brand-mark">P4</span><span><strong>PACK4</strong><small>Manutenção industrial</small></span></div>
-        <div className="login-brand-copy"><span className="eyebrow">Plataforma de serviço técnico</span><h1 id="login-brand-title">Manutenção certa.<br /><em>Sem surpresas.</em></h1><p>Clientes, equipamentos e histórico técnico reunidos num único espaço seguro.</p></div>
-        <div className="login-feature-list"><span><ShieldAlert aria-hidden="true" /> Avisos de manutenção anual</span><span><LockKeyhole aria-hidden="true" /> Acesso exclusivo de administrador</span></div>
-        <div className="login-panel-footer">PACK4 · Operações industriais</div>
-      </section>
+      <a className="login-corner-brand" href="/" aria-label="PACK4 — início">
+        <img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Screenshot_20261112_222216_Chrome-o68zNU9vfGZ4vbZnYrsm6PLX8dM8U4.jpg" alt="PACK4 — Empowering Industry" />
+      </a>
       <section className="login-form-panel" aria-labelledby="login-title">
         <div className="login-form-wrap">
           <span className="eyebrow">Master Admin</span>

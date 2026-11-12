@@ -6,9 +6,9 @@ import "./styles.css";
 import { supabase } from "./lib/supabase";
 
 function Root() {
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState(undefined);
   useEffect(() => {
-    supabase.auth.getSession?.().then(({ data }) => setSession(data?.session ?? null));
+    supabase.auth.getSession?.().then(({ data }) => setSession(data?.session ?? null)).catch(() => setSession(null));
     const result = supabase.auth.onAuthStateChange?.((_event, next) => setSession(next));
     return () => result?.data?.subscription?.unsubscribe?.();
   }, []);

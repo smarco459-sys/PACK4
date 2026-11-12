@@ -48,6 +48,16 @@ export async function fetchEquipmentByClientId(clientId) {
   return rows;
 }
 
+export async function fetchEquipmentMaintenancePlans(equipmentId) {
+  return unwrap(
+    supabase
+      .from("equipment_maintenance_plans")
+      .select("id,equipment_id,manual_id,task_title,interval_months,tasks,materials,source_excerpt,confidence,base_date,next_due_on,created_at")
+      .eq("equipment_id", equipmentId)
+      .order("next_due_on", { ascending: true }),
+  );
+}
+
 export async function fetchEquipmentHistory(equipmentId) {
   return unwrap(
     supabase
@@ -90,6 +100,17 @@ export function addDaysToDateKey(dateKey, amount) {
   const date = new Date(`${dateKey}T12:00:00`);
   date.setDate(date.getDate() + amount);
   return localDateKey(date);
+}
+
+export function addMonthsToDateKey(dateKey, amount) {
+  if (!dateKey || !Number.isInteger(amount) || amount < 1) return "";
+  const [year, month, day] = String(dateKey).slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day) return "";
+  const monthIndex = month - 1 + amount;
+  const targetYear = year + Math.floor(monthIndex / 12);
+  const targetMonth = monthIndex % 12;
+  const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+  return `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
 }
 
 export function addYearToDateKey(dateKey) {

@@ -79,7 +79,7 @@ export default function DashboardPage({ onOpenEquipment }) {
             <NavLink to="/equipamentos"><PackageCheck aria-hidden="true" /><span><strong>Equipamentos</strong><small>Pesquisar por cliente e série</small></span><ArrowRight aria-hidden="true" /></NavLink>
             <NavLink to="/manuais"><ClipboardList aria-hidden="true" /><span><strong>Manuais</strong><small>Biblioteca por marca e modelo</small></span><ArrowRight aria-hidden="true" /></NavLink>
           </div>
-          <div className="maintenance-note"><CalendarClock aria-hidden="true" /><p>Os avisos são calculados pela data da próxima manutenção preventiva registada em cada equipamento.</p></div>
+          <div className="maintenance-note"><CalendarClock aria-hidden="true" /><p>Os avisos usam a data mais próxima calculada pelo plano do manual; sem plano, continuam a usar a data preventiva registada no equipamento.</p></div>
         </aside>
 
         <article className="content-card history-card">

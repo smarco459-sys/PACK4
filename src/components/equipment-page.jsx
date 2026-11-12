@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { CalendarClock, Plus, Search, Wrench } from "lucide-react";
 import { supabase } from "../lib/supabase";
-import { addYearToDateKey, fetchClients, fetchEquipment, fetchEquipmentHistory, formatDate, localDateKey, maintenanceStatus } from "../lib/maintenance-data";
+import { addMonthsToDateKey, addYearToDateKey, fetchClients, fetchEquipment, fetchEquipmentHistory, fetchEquipmentMaintenancePlans, formatDate, localDateKey, maintenanceStatus } from "../lib/maintenance-data";
 import { EmptyState, ErrorNotice, Modal, PageHeading, StatusBadge } from "./maintenance-ui";
 
 const newEquipmentForm = { client_id: "", brand: "", model: "", serial_number: "", installed_on: "", last_maintenance_on: "", notes: "" };
@@ -83,7 +83,7 @@ export default function EquipmentPage({ preferredClientId = "", onClearPreferred
 
       {error && <ErrorNotice message="Não foi possível carregar os equipamentos." onRetry={() => mutate()} />}
       <section className="content-card equipment-results" aria-label="Resultados de equipamentos">
-        <div className="section-title-row"><div><span className="eyebrow">Resultados</span><h2>{filtered.length} equipamento{filtered.length === 1 ? "" : "s"}</h2></div><span className="subtle-label"><CalendarClock aria-hidden="true" /> Manutenção preventiva anual</span></div>
+        <div className="section-title-row"><div><span className="eyebrow">Resultados</span><h2>{filtered.length} equipamento{filtered.length === 1 ? "" : "s"}</h2></div><span className="subtle-label"><CalendarClock aria-hidden="true" /> Plano por manual ou intervalo anual</span></div>
         {isLoading ? <div className="loading-line" aria-label="A carregar equipamentos" /> : filtered.length ? (
           <div className="table-scroll"><table className="data-table equipment-table"><thead><tr><th>Cliente</th><th>Marca / Modelo</th><th>Número de série</th><th>Última manutenção</th><th>Próxima manutenção</th><th>Estado</th></tr></thead><tbody>
             {filtered.map((item) => <tr key={item.id}>
@@ -99,19 +99,20 @@ export default function EquipmentPage({ preferredClientId = "", onClearPreferred
           <div className="form-grid"><label>Marca<input required value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} /></label><label>Modelo<input required value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} /></label></div>
           <label>Número de série<input required value={form.serial_number} onChange={(event) => setForm({ ...form, serial_number: event.target.value })} /></label>
           <div className="form-grid"><label>Data de instalação<input type="date" value={form.installed_on} onChange={(event) => setForm({ ...form, installed_on: event.target.value })} /></label><label>Última manutenção<input type="date" value={form.last_maintenance_on} onChange={(event) => setForm({ ...form, last_maintenance_on: event.target.value })} /></label></div>
-          <p className="form-hint">A próxima manutenção preventiva é calculada para um ano após a última manutenção, ou após a instalação se ainda não existir histórico.</p>
+          <p className="form-hint">Sem um plano extraído de manual, a aplicação usa um intervalo anual. Quando existir um plano, as datas passam a seguir as periodicidades indicadas no manual.</p>
           <label>Notas<textarea rows="3" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
           {feedback && <p className="form-feedback" role="alert">{feedback}</p>}
           <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setFormOpen(false)}>Cancelar</button><button className="button button-primary" type="submit" disabled={saving || !clients.length}>{saving ? "A guardar…" : "Guardar equipamento"}</button></div>
         </form>
       </Modal>}
-      {selectedEquipment && <EquipmentDetails equipment={selectedEquipment} onClose={() => setSelectedEquipment(null)} onEquipmentChanged={() => mutate()} />}
+      {selectedEquipment && <EquipmentDetails equipment={selectedEquipment} onClose={() => setSelectedEquipment(null)} onEquipmentChanged={(changes) => { mutate(); if (changes) setSelectedEquipment((current) => current ? { ...current, ...changes } : current); }} />}
     </div>
   );
 }
 
 function EquipmentDetails({ equipment, onClose, onEquipmentChanged }) {
   const { data: history = [], error, isLoading, mutate } = useSWR(["equipment-history", equipment.id], ([, id]) => fetchEquipmentHistory(id));
+  const { data: plans = [], error: plansError, isLoading: plansLoading } = useSWR(["equipment-maintenance-plans", equipment.id], ([, id]) => fetchEquipmentMaintenancePlans(id));
   const [form, setForm] = useState(newHistoryForm);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -130,11 +131,48 @@ function EquipmentDetails({ equipment, onClose, onEquipmentChanged }) {
       parts_replaced: form.parts_replaced.trim() || null,
       created_by: authData.user?.id ?? null,
     });
+    if (saveError) {
+      setSaving(false);
+      return setFeedback("Não foi possível registar a assistência. Tente novamente.");
+    }
+
+    let scheduleWarning = "";
+    let equipmentChanges = null;
+    if (form.service_type === "Manutenção preventiva") {
+      const { data: plans, error: plansError } = await supabase
+        .from("equipment_maintenance_plans")
+        .select("id,interval_months")
+        .eq("equipment_id", equipment.id);
+      let nextDate = addYearToDateKey(form.service_date);
+      if (plansError) {
+        scheduleWarning = "A assistência foi registada, mas não foi possível recalcular o plano preventivo.";
+      } else if (plans?.length) {
+        const reschedules = await Promise.all(plans.map((plan) => supabase
+          .from("equipment_maintenance_plans")
+          .update({
+            base_date: form.service_date,
+            next_due_on: addMonthsToDateKey(form.service_date, plan.interval_months),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", plan.id)));
+        const failedReschedule = reschedules.some((result) => result.error);
+        if (failedReschedule) scheduleWarning = "A assistência foi registada, mas algumas datas do plano não foram atualizadas.";
+        const nextDates = plans.map((plan) => addMonthsToDateKey(form.service_date, plan.interval_months)).sort();
+        nextDate = nextDates[0] || nextDate;
+      }
+      const { error: equipmentError } = await supabase
+        .from("equipment")
+        .update({ last_maintenance_on: form.service_date, next_maintenance_on: nextDate })
+        .eq("id", equipment.id);
+      if (equipmentError) scheduleWarning = "A assistência foi registada, mas a próxima data do equipamento não foi atualizada.";
+      else equipmentChanges = { last_maintenance_on: form.service_date, next_maintenance_on: nextDate };
+    }
+
     setSaving(false);
-    if (saveError) return setFeedback("Não foi possível registar a assistência. Tente novamente.");
     setForm(newHistoryForm);
+    setFeedback(scheduleWarning);
     await mutate();
-    onEquipmentChanged?.();
+    onEquipmentChanged?.(equipmentChanges);
   }
 
   return (
@@ -142,11 +180,20 @@ function EquipmentDetails({ equipment, onClose, onEquipmentChanged }) {
       <div className="modal-body equipment-detail-body">
         <div className="equipment-detail-header"><div className="equipment-detail-icon"><Wrench aria-hidden="true" /></div><div><span className="eyebrow">{equipment.client?.name ?? "Cliente"}</span><h3>{equipment.brand} {equipment.model}</h3><p>Número de série <strong>{equipment.serial_number}</strong></p></div><StatusBadge status={maintenanceStatus(equipment.next_maintenance_on)} /></div>
         <div className="equipment-facts"><div><span>Instalado em</span><strong>{formatDate(equipment.installed_on)}</strong></div><div><span>Última manutenção</span><strong>{formatDate(equipment.last_maintenance_on)}</strong></div><div><span>Próxima manutenção</span><strong>{formatDate(equipment.next_maintenance_on)}</strong></div></div>
+        <section className="maintenance-plan-section" aria-labelledby="maintenance-plan-title">
+          <div className="section-title-row"><div><span className="eyebrow">Com base no manual</span><h3 id="maintenance-plan-title">Plano preventivo e materiais</h3></div><span className="section-count">{plans.length}</span></div>
+          {plansError ? <ErrorNotice message="Não foi possível carregar o plano preventivo." /> : plansLoading ? <div className="loading-line" aria-label="A carregar plano preventivo" /> : plans.length ? <div className="maintenance-plan-list">{plans.map((plan) => <article className="maintenance-plan-item" key={plan.id}>
+            <div className="maintenance-plan-review-heading"><div><strong>{plan.task_title}</strong><span><CalendarClock aria-hidden="true" /> A cada {plan.interval_months} {plan.interval_months === 1 ? "mês" : "meses"} · próxima: {formatDate(plan.next_due_on)}</span></div><StatusBadge status={plan.confidence} /></div>
+            {plan.tasks.length > 0 && <ul>{plan.tasks.map((task, index) => <li key={`${task}-${index}`}>{task}</li>)}</ul>}
+            {plan.materials.length > 0 ? <div className="maintenance-materials"><strong><PackageCheck aria-hidden="true" /> Materiais / peças</strong><ul>{plan.materials.map((material, index) => <li key={`${material.name}-${index}`}>{material.name}{material.quantity ? ` — ${material.quantity}` : ""}</li>)}</ul></div> : <p className="muted-text">O manual não especifica peças a substituir neste ciclo.</p>}
+            <details className="maintenance-evidence"><summary>Ver referência do manual</summary><p>“{plan.source_excerpt}”</p></details>
+          </article>)}</div> : <p className="muted-text">Ainda não existe um plano extraído de manual para este equipamento. Analise o PDF na Biblioteca técnica.</p>}
+        </section>
         <div className="history-layout">
           <section className="history-list"><div className="section-title-row"><div><span className="eyebrow">Registo técnico</span><h3>Histórico de assistências</h3></div><span className="section-count">{history.length}</span></div>
             {error ? <ErrorNotice message="Não foi possível carregar o histórico." onRetry={() => mutate()} /> : isLoading ? <div className="loading-line" aria-label="A carregar histórico" /> : history.length ? history.map((entry) => <article className="history-entry" key={entry.id}><div className="history-entry-date">{formatDate(entry.service_date)}</div><div><strong>{entry.service_type}</strong><p>{entry.description}</p>{entry.parts_replaced && <small>Peças: {entry.parts_replaced}</small>}{entry.technician && <small>Técnico: {entry.technician}</small>}</div></article>) : <EmptyState icon={Wrench} title="Sem assistências registadas" description="Registe a primeira intervenção técnica deste equipamento." />}
           </section>
-          <form className="history-form form-stack" onSubmit={addHistory}><div><span className="eyebrow">Nova intervenção</span><h3>Registar assistência</h3></div><label>Data<input type="date" required value={form.service_date} onChange={(event) => setForm({ ...form, service_date: event.target.value })} /></label><label>Tipo de assistência<select value={form.service_type} onChange={(event) => setForm({ ...form, service_type: event.target.value })}><option>Manutenção preventiva</option><option>Assistência técnica</option><option>Reparação</option><option>Inspeção</option></select></label><label>Descrição<textarea required rows="3" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label><label>Técnico<input value={form.technician} onChange={(event) => setForm({ ...form, technician: event.target.value })} /></label><label>Peças substituídas<textarea rows="2" value={form.parts_replaced} onChange={(event) => setForm({ ...form, parts_replaced: event.target.value })} /></label>{feedback && <p className="form-feedback" role="alert">{feedback}</p>}<button className="button button-primary button-block" type="submit" disabled={saving}>{saving ? "A guardar…" : "Guardar assistência"}</button><p className="form-hint">Ao guardar, a próxima manutenção fica agendada para um ano depois desta intervenção.</p></form>
+          <form className="history-form form-stack" onSubmit={addHistory}><div><span className="eyebrow">Nova intervenção</span><h3>Registar assistência</h3></div><label>Data<input type="date" required value={form.service_date} onChange={(event) => setForm({ ...form, service_date: event.target.value })} /></label><label>Tipo de assistência<select value={form.service_type} onChange={(event) => setForm({ ...form, service_type: event.target.value })}><option>Manutenção preventiva</option><option>Assistência técnica</option><option>Reparação</option><option>Inspeção</option></select></label><label>Descrição<textarea required rows="3" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label><label>Técnico<input value={form.technician} onChange={(event) => setForm({ ...form, technician: event.target.value })} /></label><label>Peças substituídas<textarea rows="2" value={form.parts_replaced} onChange={(event) => setForm({ ...form, parts_replaced: event.target.value })} /></label>{feedback && <p className="form-feedback" role="alert">{feedback}</p>}<button className="button button-primary button-block" type="submit" disabled={saving}>{saving ? "A guardar…" : "Guardar assistência"}</button><p className="form-hint">Com um plano extraído do manual, esta intervenção recalcula os ciclos e as próximas datas. Sem plano, é aplicado o intervalo anual.</p></form>
         </div>
       </div>
     </Modal>

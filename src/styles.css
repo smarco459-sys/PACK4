@@ -261,6 +261,22 @@ a { color: inherit; text-decoration: none; }
 .identification-result > svg { width: 15px; height: 15px; color: var(--teal); }
 .identification-result .status-badge { margin-left: auto; }
 .evidence-note { margin: -3px 0 0; padding: 0 2px; color: #829399; font-size: 9px; line-height: 1.5; }
+.maintenance-plan-section { display: flex; flex-direction: column; gap: 11px; padding: 15px; border: 1px solid #e2ebec; border-radius: 12px; background: #fbfdfd; }
+.maintenance-plan-section h3 { margin: 3px 0 0; color: var(--navy); font-size: 13px; }
+.maintenance-plan-list, .maintenance-plan-review-list { display: grid; gap: 9px; }
+.maintenance-plan-item, .maintenance-plan-review-item { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #e3ebec; border-radius: 10px; background: #fff; }
+.maintenance-plan-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.maintenance-plan-review-heading > div { display: flex; flex-direction: column; gap: 5px; }
+.maintenance-plan-review-heading strong { color: #304b54; font-size: 11px; }
+.maintenance-plan-review-heading span { display: flex; align-items: center; gap: 5px; color: #72878d; font-size: 9px; }
+.maintenance-plan-review-heading span svg, .maintenance-materials strong svg { width: 13px; height: 13px; color: var(--teal); }
+.maintenance-plan-item ul, .maintenance-plan-review-item ul { display: grid; gap: 4px; margin: 0; padding-left: 17px; color: #637980; font-size: 9px; line-height: 1.5; }
+.maintenance-materials { display: grid; gap: 6px; }
+.maintenance-materials strong { display: flex; align-items: center; gap: 5px; color: #526a71; font-size: 9px; }
+.maintenance-evidence { color: #71858b; font-size: 9px; line-height: 1.5; }
+.maintenance-evidence summary { cursor: pointer; font-weight: 700; }
+.maintenance-evidence p { margin: 6px 0 0; }
+.manual-row { flex-wrap: wrap; }
 .spinner { width: 17px; height: 17px; border: 2px solid #cfe0de; border-top-color: var(--teal); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

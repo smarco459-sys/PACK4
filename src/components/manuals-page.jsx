@@ -2,8 +2,10 @@ import { useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { BookOpen, Download, FileText, FolderOpen, Plus, Search, Sparkles, Upload } from "lucide-react";
 import { supabase } from "../lib/supabase";
-import { fetchManuals, MANUALS_BUCKET } from "../lib/maintenance-data";
+import { extractPdfText } from "../lib/manual-pdf";
+import { fetchEquipment, fetchManuals, MANUALS_BUCKET } from "../lib/maintenance-data";
 import { EmptyState, ErrorNotice, Modal, PageHeading, StatusBadge } from "./maintenance-ui";
+import ManualMaintenanceReview from "./manual-maintenance-review";
 
 function slug(value) {
   return String(value || "manual")
@@ -15,25 +17,14 @@ function slug(value) {
     .slice(0, 80) || "manual";
 }
 
-async function extractPdfText(file) {
-  const { getDocument } = await import("pdfjs-dist");
-  const document = await getDocument({ data: await file.arrayBuffer() }).promise;
-  let text = "";
-  const pageLimit = Math.min(document.numPages, 120);
-  for (let pageNumber = 1; pageNumber <= pageLimit && text.length < 30000; pageNumber += 1) {
-    const page = await document.getPage(pageNumber);
-    const content = await page.getTextContent();
-    text += `${content.items.map((item) => item.str ?? "").join(" ")}\n`;
-  }
-  return text.replace(/\s+/g, " ").trim().slice(0, 30000);
-}
-
 export default function ManualsPage() {
   const { data: manuals = [], error, isLoading, mutate } = useSWR("equipment-manuals", fetchManuals);
+  const { data: equipment = [], mutate: mutateEquipment } = useSWR("equipment", fetchEquipment);
   const [search, setSearch] = useState("");
   const [activeManual, setActiveManual] = useState(null);
   const [busy, setBusy] = useState(false);
   const [identifying, setIdentifying] = useState(false);
+  const [planManual, setPlanManual] = useState(null);
   const [feedback, setFeedback] = useState("");
   const inputRef = useRef(null);
 
@@ -138,12 +129,13 @@ export default function ManualsPage() {
           {Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, "pt-PT")).map(([brand, models]) => (
             <section className="content-card brand-folder" key={brand}>
               <header className="brand-folder-header"><div className="folder-icon"><FolderOpen aria-hidden="true" /></div><div><span className="eyebrow">Marca</span><h2>{brand}</h2></div><span className="record-count">{Object.values(models).reduce((sum, items) => sum + items.length, 0)} manuais</span></header>
-              {Object.entries(models).sort(([a], [b]) => a.localeCompare(b, "pt-PT")).map(([model, items]) => <section className="model-folder" key={model}><div className="model-folder-title"><div><span className="eyebrow">Modelo</span><h3>{model}</h3></div><span className="section-count">{items.length}</span></div><div className="manual-list">{items.map((manual) => <article className="manual-row" key={manual.id}><div className="manual-file-icon"><FileText aria-hidden="true" /></div><div className="manual-file-details"><strong>{manual.title}</strong><span>{manual.file_name} · {(manual.file_size / (1024 * 1024)).toFixed(1)} MB</span></div><StatusBadge status={manual.identification_confidence || "review"} /><button type="button" className="button button-quiet" onClick={() => openManual(manual)}><Download aria-hidden="true" /> Abrir PDF</button></article>)}</div></section>)}
+              {Object.entries(models).sort(([a], [b]) => a.localeCompare(b, "pt-PT")).map(([model, items]) => <section className="model-folder" key={model}><div className="model-folder-title"><div><span className="eyebrow">Modelo</span><h3>{model}</h3></div><span className="section-count">{items.length}</span></div><div className="manual-list">{items.map((manual) => <article className="manual-row" key={manual.id}><div className="manual-file-icon"><FileText aria-hidden="true" /></div><div className="manual-file-details"><strong>{manual.title}</strong><span>{manual.file_name} · {(manual.file_size / (1024 * 1024)).toFixed(1)} MB</span></div><StatusBadge status={manual.identification_confidence || "review"} /><button type="button" className="button button-quiet" onClick={() => setPlanManual(manual)}><Sparkles aria-hidden="true" /> Analisar plano</button><button type="button" className="button button-quiet" onClick={() => openManual(manual)}><Download aria-hidden="true" /> Abrir PDF</button></article>)}</div></section>)}
             </section>
           ))}
         </div>
       ) : <div className="content-card"><EmptyState icon={BookOpen} title={search ? "Nenhum manual encontrado" : "A biblioteca ainda está vazia"} description={search ? "Experimente procurar por outra marca ou modelo." : "Importe um manual PDF para começar a organizar a biblioteca por marca e modelo."} action={!search && <button className="button button-primary" type="button" onClick={() => inputRef.current?.click()}><Plus aria-hidden="true" /> Importar primeiro manual</button>} /></div>}
 
+      {planManual && <ManualMaintenanceReview manual={planManual} equipment={equipment} onClose={() => setPlanManual(null)} onSaved={() => mutateEquipment()} />}
       {activeManual && <Modal title="Confirmar dados do manual" onClose={() => { if (!busy) setActiveManual(null); }}>
         <form className="modal-body form-stack" onSubmit={saveManual}>
           <div className="manual-review-file"><FileText aria-hidden="true" /><div><strong>{activeManual.file.name}</strong><span>{(activeManual.file.size / (1024 * 1024)).toFixed(1)} MB · PDF</span></div></div>

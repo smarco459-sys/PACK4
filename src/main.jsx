@@ -5,7 +5,7 @@ import App from "./App.jsx";
 import "./styles.css";
 import { supabase } from "./lib/supabase";
 
-const PACK4_LOGO = "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Screenshot_20261112_222216_Chrome-o68zNU9vfGZ4vbZnYrsm6PLX8dM8U4.jpg";
+const PACK4_LOGO = "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Log%C3%B3tipo%20PACK4%20Laranja%20com%20Tagline-hE0b5NAlsuEqNIp2rRuAkyBLWxDroA.png";
 
 function StartupScreen() {
   return (

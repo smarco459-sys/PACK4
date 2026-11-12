@@ -33,7 +33,7 @@ function Login() {
   return (
     <main className="login-screen">
       <a className="login-corner-brand" href="/" aria-label="PACK4 — início">
-        <img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Screenshot_20261112_222216_Chrome-o68zNU9vfGZ4vbZnYrsm6PLX8dM8U4.jpg" alt="PACK4 — Empowering Industry" />
+        <img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Log%C3%B3tipo%20PACK4%20Laranja%20com%20Tagline-hE0b5NAlsuEqNIp2rRuAkyBLWxDroA.png" alt="PACK4 — Empowering Industry" />
       </a>
       <section className="login-form-panel" aria-labelledby="login-title">
         <div className="login-form-wrap">

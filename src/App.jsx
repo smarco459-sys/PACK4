@@ -50,22 +50,49 @@ function Login() {
     setBusy(false);
   }
 
-  return <div className="login-shell">
-    <div className="login-card">
-<div className="brand-large">PACK4</div>
-  <div className="brand-sub">GESTÃO DE AGENDAMENTOS</div>
-  <h1>Entrar</h1>
-  <p className="muted">Acesso à agenda</p>
-      <form onSubmit={submit}>
-        <label>Email<input name="email" type="email" autoComplete="email" inputMode="email" value={email} onChange={e=>setEmail(e.target.value)} required /></label>
-        <label>Password<input name="password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required /></label>
-        {error && <div className="alert danger">{error}</div>}
-        {sent && <div className="alert success">Email de recuperação enviado.</div>}
-        <Button type="submit" className="primary wide" disabled={busy}>{busy ? "A entrar..." : "Entrar"}</Button>
+  return <main className="login-shell">
+    <section className="login-showcase" aria-labelledby="login-showcase-title">
+      <div className="login-showcase-brand">
+        <span className="login-brand-mark" aria-hidden="true">P4</span>
+        <span className="login-brand-copy"><strong>PACK4</strong><small>Operações de serviço</small></span>
+      </div>
+      <div className="login-showcase-copy">
+        <span className="login-showcase-kicker">Soluções para indústria</span>
+        <h2 id="login-showcase-title">Uma operação.<br />Tudo no lugar.</h2>
+        <p>Agenda, equipa, clientes e serviços reunidos num só espaço de trabalho.</p>
+      </div>
+      <ul className="login-module-list" aria-label="Áreas principais da PACK4">
+        <li><CalendarDays aria-hidden="true"/><span>Agenda</span></li>
+        <li><UserRoundCog aria-hidden="true"/><span>Equipa</span></li>
+        <li><Package aria-hidden="true"/><span>Serviços</span></li>
+      </ul>
+      <div className="login-showcase-footer">
+        <span>Gestão operacional</span>
+        <span><ShieldCheck aria-hidden="true"/> Acesso autenticado</span>
+      </div>
+    </section>
+    <section className="login-card" aria-labelledby="login-title">
+      <header className="login-form-heading">
+        <span className="login-welcome">Área de gestão</span>
+        <h1 id="login-title">Entrar</h1>
+        <p className="muted">Aceda ao espaço de trabalho da sua equipa.</p>
+      </header>
+      <form className="login-form" onSubmit={submit}>
+        <label htmlFor="login-email">Email
+          <input id="login-email" name="email" type="email" autoComplete="email" inputMode="email" value={email} onChange={e=>setEmail(e.target.value)} required />
+        </label>
+        <label htmlFor="login-password">Password
+          <input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required />
+        </label>
+        <div className="login-feedback" aria-live="polite" aria-atomic="true">
+          {error && <div className="alert danger" role="alert">{error}</div>}
+          {sent && <div className="alert success" role="status">Email de recuperação enviado.</div>}
+        </div>
+        <Button type="submit" className="primary wide login-submit" disabled={busy}>{busy ? "A entrar…" : "Entrar"}</Button>
       </form>
       <button className="link-btn" onClick={reset} disabled={busy}>Esqueci-me da password</button>
-    </div>
-  </div>;
+    </section>
+  </main>;
 }
 
 function Shell({ session }) {

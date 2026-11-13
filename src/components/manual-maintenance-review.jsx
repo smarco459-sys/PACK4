@@ -40,8 +40,19 @@ export default function ManualMaintenanceReview({ manual, equipment, onClose, on
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ text, brand: manual.brand, model: manual.model }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Não foi possível analisar o manual.");
+      const responseText = await response.text();
+      let result = null;
+      try {
+        result = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        result = null;
+      }
+      if (!response.ok) {
+        throw new Error(result?.error || `O serviço de análise não respondeu corretamente (HTTP ${response.status}).`);
+      }
+      if (!result || typeof result !== "object" || Array.isArray(result)) {
+        throw new Error("O serviço de análise devolveu uma resposta vazia ou inválida.");
+      }
       setAnalysis(result);
       const identityDiffers = result.brand && result.model && (normalize(result.brand) !== normalize(manual.brand) || normalize(result.model) !== normalize(manual.model));
       if (identityDiffers) {

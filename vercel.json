@@ -2,6 +2,9 @@
   "functions": {
     "api/manual-identify.js": {
       "maxDuration": 60
+    },
+    "api/manual-maintenance.js": {
+      "maxDuration": 60
     }
   },
   "headers": [

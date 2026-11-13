@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/manual-identify.js": {
+      "maxDuration": 60
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",

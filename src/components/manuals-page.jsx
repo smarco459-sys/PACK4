@@ -72,8 +72,19 @@ export default function ManualsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ text }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Não foi possível identificar o manual.");
+      const responseText = await response.text();
+      let result = null;
+      try {
+        result = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        result = null;
+      }
+      if (!response.ok) {
+        throw new Error(result?.error || `O serviço de identificação não respondeu corretamente (HTTP ${response.status}). Pode preencher a marca e o modelo manualmente.`);
+      }
+      if (!result || typeof result !== "object" || Array.isArray(result)) {
+        throw new Error("O serviço de identificação devolveu uma resposta vazia ou inválida. Pode preencher a marca e o modelo manualmente.");
+      }
       setActiveManual((current) => current ? { ...current, ...result } : current);
     } catch (cause) {
       setFeedback(cause.message || "Não foi possível identificar automaticamente. Pode preencher os campos manualmente.");

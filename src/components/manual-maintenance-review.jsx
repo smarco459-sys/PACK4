@@ -43,6 +43,12 @@ export default function ManualMaintenanceReview({ manual, equipment, onClose, on
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Não foi possível analisar o manual.");
       setAnalysis(result);
+      const identityDiffers = result.brand && result.model && (normalize(result.brand) !== normalize(manual.brand) || normalize(result.model) !== normalize(manual.model));
+      if (identityDiffers) {
+        const identifiedEquipment = equipment.find((item) => normalize(item.brand) === normalize(result.brand) && normalize(item.model) === normalize(result.model));
+        setEquipmentId(identifiedEquipment?.id ?? "");
+        setBaseDate(identifiedEquipment?.last_maintenance_on || identifiedEquipment?.installed_on || "");
+      }
       setPhase("review");
     } catch (cause) {
       setError(cause.message || "Não foi possível analisar este manual.");
@@ -113,6 +119,8 @@ export default function ManualMaintenanceReview({ manual, equipment, onClose, on
         {phase === "ready" && <><p className="modal-intro">A análise procura apenas intervalos e materiais indicados explicitamente no PDF. Confirme os resultados antes de os associar ao equipamento.</p><button className="button button-primary" type="button" onClick={analyzeManual}><Sparkles aria-hidden="true" /> Analisar este manual</button></>}
         {phase === "review" && <form className="form-stack" onSubmit={savePlan}>
           <div className="identification-result"><CheckCircle2 aria-hidden="true" /><span>Revise as recomendações extraídas. A data não é estimada: indique a última manutenção ou a instalação.</span></div>
+          <div className="manual-detected-identity"><div><span>Marca detetada</span><strong>{analysis.brand || "Não identificada"}</strong></div><div><span>Modelo detetado</span><strong>{analysis.model || "Não identificado"}</strong></div>{analysis.identity_evidence && <p>Fonte do manual: “{analysis.identity_evidence}”</p>}</div>
+          {analysis.brand && analysis.model && (normalize(analysis.brand) !== normalize(manual.brand) || normalize(analysis.model) !== normalize(manual.model)) && <p className="identity-mismatch" role="status">A identificação do PDF difere da ficha do manual. Confirme o equipamento correto na lista antes de guardar o plano.</p>}
           <p className="modal-intro">{analysis.summary}</p>
           {analysis.events.length ? <div className="maintenance-plan-review-list">{analysis.events.map((item, index) => <article className="maintenance-plan-review-item" key={`${item.title}-${item.interval_months}-${index}`}>
             <div className="maintenance-plan-review-heading"><div><strong>{item.title}</strong><span><CalendarClock aria-hidden="true" /> A cada {item.interval_months} {item.interval_months === 1 ? "mês" : "meses"}</span></div><StatusBadge status={item.confidence} /></div>

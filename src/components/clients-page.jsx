@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import useSWR from "swr";
-import { Building2, FileSpreadsheet, Plus, Search, Users, Wrench } from "lucide-react";
+import useSWR, { useSWRConfig } from "swr";
+import { Building2, FileSpreadsheet, Pencil, Plus, Search, Trash2, Users, Wrench } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { fetchClients, fetchEquipmentByClientId, fetchWorkspaces } from "../lib/maintenance-data";
-import { EmptyState, ErrorNotice, Modal, PageHeading } from "./maintenance-ui";
+import { ConfirmActionDialog, EmptyState, ErrorNotice, Modal, PageHeading } from "./maintenance-ui";
 
 const emptyClient = { name: "", contact_name: "", phone: "", email: "", address: "", postal_code: "", city: "", notes: "" };
 
@@ -24,6 +24,7 @@ function cleanCell(value) {
 export default function ClientsPage({ onShowEquipment }) {
   const { data: clients = [], error, isLoading, mutate } = useSWR("clients", fetchClients);
   const { data: workspaces = [] } = useSWR("workspaces", fetchWorkspaces);
+  const { mutate: mutateCache } = useSWRConfig();
   const [query, setQuery] = useState("");
   const [workspaceId, setWorkspaceId] = useState("");
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -32,6 +33,9 @@ export default function ClientsPage({ onShowEquipment }) {
   const [form, setForm] = useState(emptyClient);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [deleteClient, setDeleteClient] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [importRows, setImportRows] = useState([]);
   const [importFile, setImportFile] = useState(null);
   const [importing, setImporting] = useState(false);
@@ -90,6 +94,26 @@ export default function ClientsPage({ onShowEquipment }) {
     await mutate();
     setFormOpen(false);
     setSelectedClientId(editing?.id ?? "");
+  }
+
+  async function removeClient() {
+    if (!deleteClient) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    const { error: deleteError } = await supabase.from("clients").delete().eq("id", deleteClient.id);
+    if (deleteError) {
+      setDeleteBusy(false);
+      return setDeleteError("Não foi possível eliminar o cliente. Verifique as permissões e tente novamente.");
+    }
+    setSelectedClientId("");
+    await Promise.all([
+      mutate(),
+      mutateCache("equipment"),
+      mutateCache((key) => Array.isArray(key) && key[0] === "client-equipment"),
+    ]);
+    setDeleteBusy(false);
+    setDeleteClient(null);
+    setFeedback(`Cliente “${deleteClient.name}” e os equipamentos, planos e históricos associados foram eliminados.`);
   }
 
   async function parseExcel(file) {
@@ -167,7 +191,7 @@ export default function ClientsPage({ onShowEquipment }) {
               {filteredClients.map((client) => <tr key={client.id} className={selectedClientId === client.id ? "selected-row" : ""}>
                 <td><button className="client-name-button" type="button" onClick={() => setSelectedClientId(client.id)}><span className="client-monogram">{client.name.slice(0, 1).toLocaleUpperCase("pt-PT")}</span><span><strong>{client.name}</strong><small>{client.email || "Ficha de cliente"}</small></span></button></td>
                 <td>{client.contact_name || "—"}</td><td>{client.phone || "—"}</td><td>{client.city || "—"}</td><td>{workspaceName(client.workspace_id)}</td>
-                <td><button type="button" className="icon-button" aria-label={`Editar ${client.name}`} onClick={() => startEdit(client)}>Editar</button></td>
+                <td><div className="table-actions"><button type="button" className="icon-button" aria-label={`Editar ${client.name}`} title="Editar cliente" onClick={() => startEdit(client)}><Pencil aria-hidden="true" /></button><button type="button" className="icon-button icon-button-danger" aria-label={`Eliminar ${client.name}`} title="Eliminar cliente" onClick={() => { setDeleteClient(client); setDeleteError(""); }}><Trash2 aria-hidden="true" /></button></div></td>
               </tr>)}
             </tbody></table></div>
           ) : <EmptyState icon={Users} title="Ainda não há clientes nesta lista" description={workspaceId ? "Crie um cliente ou importe um ficheiro Excel para começar." : "Crie um espaço de trabalho antes de registar clientes."} action={!workspaces.length ? undefined : <button className="button button-primary" type="button" onClick={startCreate}><Plus aria-hidden="true" /> Novo cliente</button>} />}
@@ -175,6 +199,8 @@ export default function ClientsPage({ onShowEquipment }) {
 
         {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClientId("")} onShowEquipment={onShowEquipment} />}
       </div>
+
+      {deleteClient && <ConfirmActionDialog title="Eliminar cliente?" description={`A ficha de “${deleteClient.name}” será removida, juntamente com os equipamentos, planos preventivos e históricos de assistência associados. Os registos de serviços existentes serão mantidos sem ligação ao cliente.`} confirmLabel="Eliminar cliente" busy={deleteBusy} error={deleteError} onCancel={() => { if (!deleteBusy) setDeleteClient(null); }} onConfirm={removeClient} />}
 
       {importRows.length > 0 && <Modal title="Pré-visualizar importação" onClose={() => { setImportRows([]); setImportFile(null); }} wide>
         <div className="modal-body">

@@ -1,10 +1,10 @@
 import { useMemo, useRef, useState } from "react";
-import useSWR from "swr";
-import { BookOpen, Download, FileText, FolderOpen, Plus, Search, Sparkles, Upload } from "lucide-react";
+import useSWR, { useSWRConfig } from "swr";
+import { BookOpen, Download, FileText, FolderOpen, Pencil, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { extractPdfText } from "../lib/manual-pdf";
-import { fetchEquipment, fetchManuals, MANUALS_BUCKET } from "../lib/maintenance-data";
-import { EmptyState, ErrorNotice, Modal, PageHeading, StatusBadge } from "./maintenance-ui";
+import { addYearToDateKey, fetchEquipment, fetchManuals, MANUALS_BUCKET } from "../lib/maintenance-data";
+import { ConfirmActionDialog, EmptyState, ErrorNotice, Modal, PageHeading, StatusBadge } from "./maintenance-ui";
 import ManualMaintenanceReview from "./manual-maintenance-review";
 
 function slug(value) {
@@ -20,8 +20,17 @@ function slug(value) {
 export default function ManualsPage() {
   const { data: manuals = [], error, isLoading, mutate } = useSWR("equipment-manuals", fetchManuals);
   const { data: equipment = [], mutate: mutateEquipment } = useSWR("equipment", fetchEquipment);
+  const { mutate: mutateCache } = useSWRConfig();
   const [search, setSearch] = useState("");
   const [activeManual, setActiveManual] = useState(null);
+  const [editingManual, setEditingManual] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [deleteManual, setDeleteManual] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [orphanedPdf, setOrphanedPdf] = useState(null);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [identifying, setIdentifying] = useState(false);
   const [planManual, setPlanManual] = useState(null);
@@ -110,6 +119,98 @@ export default function ManualsPage() {
     await mutate();
   }
 
+  async function saveManualEdits(event) {
+    event.preventDefault();
+    if (!editingManual) return;
+    setEditBusy(true);
+    setEditError("");
+    const { error: updateError } = await supabase.from("equipment_manuals").update({
+      brand: editingManual.brand.trim(),
+      model: editingManual.model.trim(),
+      title: editingManual.title.trim(),
+    }).eq("id", editingManual.id);
+    setEditBusy(false);
+    if (updateError) return setEditError("Não foi possível atualizar o manual. Tente novamente.");
+    await mutate();
+    setEditingManual(null);
+    setFeedback("Dados do manual atualizados.");
+  }
+
+  async function removeManual() {
+    if (!deleteManual) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    const { data: linkedPlans, error: plansReadError } = await supabase
+      .from("equipment_maintenance_plans")
+      .select("equipment_id")
+      .eq("manual_id", deleteManual.id);
+    if (plansReadError) {
+      setDeleteBusy(false);
+      return setDeleteError("Não foi possível verificar os planos associados; o manual não foi eliminado.");
+    }
+
+    const equipmentIds = [...new Set((linkedPlans || []).map((plan) => plan.equipment_id).filter(Boolean))];
+    const { error: deleteError } = await supabase.from("equipment_manuals").delete().eq("id", deleteManual.id);
+    if (deleteError) {
+      setDeleteBusy(false);
+      return setDeleteError("Não foi possível eliminar o manual. Verifique as permissões e tente novamente.");
+    }
+
+    const { error: storageError } = deleteManual.storage_path
+      ? await supabase.storage.from(MANUALS_BUCKET).remove([deleteManual.storage_path])
+      : { error: null };
+    if (storageError) setOrphanedPdf({ path: deleteManual.storage_path, title: deleteManual.title });
+
+    let scheduleWarning = false;
+    if (equipmentIds.length) {
+      const { data: linkedEquipment, error: equipmentReadError } = await supabase
+        .from("equipment")
+        .select("id,installed_on,last_maintenance_on")
+        .in("id", equipmentIds);
+      if (equipmentReadError) {
+        scheduleWarning = true;
+      } else {
+        const scheduleUpdates = await Promise.all((linkedEquipment || []).map(async (item) => {
+          const { data: remainingPlans, error: remainingPlansError } = await supabase
+            .from("equipment_maintenance_plans")
+            .select("next_due_on")
+            .eq("equipment_id", item.id)
+            .order("next_due_on", { ascending: true })
+            .limit(1);
+          if (remainingPlansError) return remainingPlansError;
+          const nextDate = remainingPlans?.[0]?.next_due_on || addYearToDateKey(item.last_maintenance_on || item.installed_on);
+          const { error: updateError } = await supabase.from("equipment")
+            .update({ next_maintenance_on: nextDate || null })
+            .eq("id", item.id);
+          return updateError;
+        }));
+        scheduleWarning = scheduleUpdates.some(Boolean);
+      }
+    }
+
+    await Promise.all([
+      mutate(),
+      mutateEquipment(),
+      mutateCache((key) => Array.isArray(key) && key[0] === "equipment-maintenance-plans"),
+    ]);
+    setDeleteBusy(false);
+    setDeleteManual(null);
+    setFeedback([
+      storageError && "O manual e os planos foram eliminados, mas não foi possível remover o PDF do armazenamento.",
+      scheduleWarning && "Não foi possível recalcular algumas datas de manutenção.",
+    ].filter(Boolean).join(" ") || "Manual, PDF e planos preventivos associados eliminados.");
+  }
+
+  async function retryPdfCleanup() {
+    if (!orphanedPdf?.path) return;
+    setCleanupBusy(true);
+    const { error: cleanupError } = await supabase.storage.from(MANUALS_BUCKET).remove([orphanedPdf.path]);
+    setCleanupBusy(false);
+    if (cleanupError) return setFeedback("O PDF continua no armazenamento. Tente novamente mais tarde.");
+    setOrphanedPdf(null);
+    setFeedback("PDF removido do armazenamento.");
+  }
+
   async function openManual(manual) {
     const { data, error: urlError } = await supabase.storage.from(MANUALS_BUCKET).createSignedUrl(manual.storage_path, 60);
     if (urlError || !data?.signedUrl) return setFeedback("Não foi possível abrir este manual.");
@@ -123,18 +224,29 @@ export default function ManualsPage() {
       <PageHeading eyebrow="Biblioteca técnica" title="Manuais de equipamentos" description="Organize os PDFs por marca e modelo. A identificação automática é uma sugestão e deve ser confirmada antes de guardar." action={<><input ref={inputRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={handleFile} aria-label="Importar manual PDF" /><button className="button button-primary" type="button" onClick={() => inputRef.current?.click()}><Upload aria-hidden="true" /> Importar manual</button></>} />
       <section className="content-card directory-toolbar"><label className="search-field"><Search aria-hidden="true" /><span className="visually-hidden">Pesquisar manuais</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Pesquisar por marca, modelo ou nome do manual" /></label><span className="record-count">{count} manuais</span></section>
       {feedback && !activeManual && <p className="inline-feedback" role="status">{feedback}</p>}
+      {orphanedPdf && <div className="storage-cleanup-notice" role="status"><span>O ficheiro PDF de “{orphanedPdf.title}” ainda está no armazenamento.</span><button className="button button-quiet" type="button" onClick={retryPdfCleanup} disabled={cleanupBusy}>{cleanupBusy ? "A tentar…" : "Tentar remover PDF"}</button></div>}
       {error && <ErrorNotice message="Não foi possível carregar a biblioteca de manuais." onRetry={() => mutate()} />}
       {isLoading ? <div className="content-card loading-panel"><div className="loading-line" aria-label="A carregar manuais" /></div> : Object.keys(groups).length ? (
         <div className="manual-brand-list">
           {Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, "pt-PT")).map(([brand, models]) => (
             <section className="content-card brand-folder" key={brand}>
               <header className="brand-folder-header"><div className="folder-icon"><FolderOpen aria-hidden="true" /></div><div><span className="eyebrow">Marca</span><h2>{brand}</h2></div><span className="record-count">{Object.values(models).reduce((sum, items) => sum + items.length, 0)} manuais</span></header>
-              {Object.entries(models).sort(([a], [b]) => a.localeCompare(b, "pt-PT")).map(([model, items]) => <section className="model-folder" key={model}><div className="model-folder-title"><div><span className="eyebrow">Modelo</span><h3>{model}</h3></div><span className="section-count">{items.length}</span></div><div className="manual-list">{items.map((manual) => <article className="manual-row" key={manual.id}><div className="manual-file-icon"><FileText aria-hidden="true" /></div><div className="manual-file-details"><strong>{manual.title}</strong><span>{manual.file_name} · {(manual.file_size / (1024 * 1024)).toFixed(1)} MB</span></div><StatusBadge status={manual.identification_confidence || "review"} /><button type="button" className="button button-quiet" onClick={() => setPlanManual(manual)}><Sparkles aria-hidden="true" /> Analisar plano</button><button type="button" className="button button-quiet" onClick={() => openManual(manual)}><Download aria-hidden="true" /> Abrir PDF</button></article>)}</div></section>)}
+              {Object.entries(models).sort(([a], [b]) => a.localeCompare(b, "pt-PT")).map(([model, items]) => <section className="model-folder" key={model}><div className="model-folder-title"><div><span className="eyebrow">Modelo</span><h3>{model}</h3></div><span className="section-count">{items.length}</span></div><div className="manual-list">{items.map((manual) => <article className="manual-row" key={manual.id}><div className="manual-file-icon"><FileText aria-hidden="true" /></div><div className="manual-file-details"><strong>{manual.title}</strong><span>{manual.file_name} · {(manual.file_size / (1024 * 1024)).toFixed(1)} MB</span></div><StatusBadge status={manual.identification_confidence || "review"} /><button type="button" className="button button-quiet" onClick={() => setPlanManual(manual)}><Sparkles aria-hidden="true" /> Analisar plano</button><button type="button" className="button button-quiet" onClick={() => openManual(manual)}><Download aria-hidden="true" /> Abrir PDF</button><button type="button" className="button button-quiet" onClick={() => { setEditingManual({ ...manual }); setEditError(""); }} aria-label={`Editar o manual ${manual.title}`}><Pencil aria-hidden="true" /> Editar</button><button type="button" className="button button-quiet button-danger-quiet" onClick={() => { setDeleteManual(manual); setDeleteError(""); }} aria-label={`Eliminar o manual ${manual.title}`}><Trash2 aria-hidden="true" /> Eliminar</button></article>)}</div></section>)}
             </section>
           ))}
         </div>
       ) : <div className="content-card"><EmptyState icon={BookOpen} title={search ? "Nenhum manual encontrado" : "A biblioteca ainda está vazia"} description={search ? "Experimente procurar por outra marca ou modelo." : "Importe um manual PDF para começar a organizar a biblioteca por marca e modelo."} action={!search && <button className="button button-primary" type="button" onClick={() => inputRef.current?.click()}><Plus aria-hidden="true" /> Importar primeiro manual</button>} /></div>}
 
+      {editingManual && <Modal title="Editar manual" onClose={() => { if (!editBusy) setEditingManual(null); }}>
+        <form className="modal-body form-stack" onSubmit={saveManualEdits}>
+          <label>Marca<input autoFocus required value={editingManual.brand} onChange={(event) => setEditingManual({ ...editingManual, brand: event.target.value })} /></label>
+          <label>Modelo<input required value={editingManual.model} onChange={(event) => setEditingManual({ ...editingManual, model: event.target.value })} /></label>
+          <label>Nome do manual<input required value={editingManual.title} onChange={(event) => setEditingManual({ ...editingManual, title: event.target.value })} /></label>
+          {editError && <p className="form-feedback" role="alert">{editError}</p>}
+          <div className="modal-actions"><button className="button button-secondary" type="button" disabled={editBusy} onClick={() => setEditingManual(null)}>Cancelar</button><button className="button button-primary" type="submit" disabled={editBusy}>{editBusy ? "A guardar…" : "Guardar alterações"}</button></div>
+        </form>
+      </Modal>}
+      {deleteManual && <ConfirmActionDialog title="Eliminar manual?" description={`O manual “${deleteManual.title}” e o PDF serão removidos. Os planos preventivos que o usam também serão eliminados; os equipamentos e o histórico de assistências serão mantidos.`} confirmLabel="Eliminar manual" busy={deleteBusy} error={deleteError} onCancel={() => { if (!deleteBusy) setDeleteManual(null); }} onConfirm={removeManual} />}
       {planManual && <ManualMaintenanceReview manual={planManual} equipment={equipment} onClose={() => setPlanManual(null)} onSaved={() => mutateEquipment()} />}
       {activeManual && <Modal title="Confirmar dados do manual" onClose={() => { if (!busy) setActiveManual(null); }}>
         <form className="modal-body form-stack" onSubmit={saveManual}>

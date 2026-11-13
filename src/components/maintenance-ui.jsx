@@ -24,7 +24,6 @@ export function MetricCard({ icon: Icon, label, value, detail, tone = "default" 
     </article>
   );
 }
-
 export function StatusBadge({ status, children }) {
   const labels = {
     overdue: "Atrasada",
@@ -59,7 +58,7 @@ export function ErrorNotice({ message, onRetry }) {
   );
 }
 
-export function Modal({ title, onClose, children, wide = false }) {
+export function Modal({ title, onClose, children, wide = false, dialogRole = "dialog", describedBy }) {
   const dialogRef = useRef(null);
   useEffect(() => {
     const previous = document.activeElement;
@@ -77,9 +76,10 @@ export function Modal({ title, onClose, children, wide = false }) {
       <section
         ref={dialogRef}
         className={`modal-card${wide ? " modal-wide" : ""}`}
-        role="dialog"
+        role={dialogRole}
         aria-modal="true"
         aria-label={title}
+        aria-describedby={describedBy}
         tabIndex={-1}
         onKeyDown={(event) => event.key === "Escape" && onClose()}
       >
@@ -90,5 +90,20 @@ export function Modal({ title, onClose, children, wide = false }) {
         {children}
       </section>
     </div>
+  );
+}
+
+export function ConfirmActionDialog({ title, description, confirmLabel = "Eliminar", busy = false, error = "", onCancel, onConfirm }) {
+  return (
+    <Modal title={title} onClose={onCancel} dialogRole="alertdialog" describedBy="confirm-action-description">
+      <div className="modal-body">
+        <p id="confirm-action-description" className="modal-intro">{description}</p>
+        {error && <p className="form-feedback" role="alert">{error}</p>}
+        <div className="modal-actions">
+          <button className="button button-secondary" type="button" onClick={onCancel} disabled={busy}>Cancelar</button>
+          <button className="button button-danger" type="button" onClick={onConfirm} disabled={busy}>{busy ? "A eliminar…" : confirmLabel}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import useSWR from "swr";
-import { CalendarClock, Plus, Search, Wrench } from "lucide-react";
+import useSWR, { useSWRConfig } from "swr";
+import { CalendarClock, PackageCheck, Pencil, Plus, Search, Trash2, Wrench } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { addMonthsToDateKey, addYearToDateKey, fetchClients, fetchEquipment, fetchEquipmentHistory, fetchEquipmentMaintenancePlans, formatDate, localDateKey, maintenanceStatus } from "../lib/maintenance-data";
-import { EmptyState, ErrorNotice, Modal, PageHeading, StatusBadge } from "./maintenance-ui";
+import { ConfirmActionDialog, EmptyState, ErrorNotice, Modal, PageHeading, StatusBadge } from "./maintenance-ui";
 
 const newEquipmentForm = { client_id: "", brand: "", model: "", serial_number: "", installed_on: "", last_maintenance_on: "", notes: "" };
 const newHistoryForm = { service_date: localDateKey(), service_type: "Manutenção preventiva", description: "", technician: "", parts_replaced: "" };
@@ -11,12 +11,17 @@ const newHistoryForm = { service_date: localDateKey(), service_type: "Manutenç�
 export default function EquipmentPage({ preferredClientId = "", onClearPreferredClient }) {
   const { data: equipment = [], error, isLoading, mutate } = useSWR("equipment", fetchEquipment);
   const { data: clients = [] } = useSWR("clients", fetchClients);
+  const { mutate: mutateCache } = useSWRConfig();
   const [search, setSearch] = useState("");
   const [selectedClientId, setSelectedClientId] = useState(preferredClientId);
   const [formOpen, setFormOpen] = useState(false);
+  const [editingEquipment, setEditingEquipment] = useState(null);
   const [form, setForm] = useState({ ...newEquipmentForm, client_id: preferredClientId });
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [deleteEquipment, setDeleteEquipment] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [selectedEquipment, setSelectedEquipment] = useState(null);
 
   useEffect(() => {
@@ -36,15 +41,53 @@ export default function EquipmentPage({ preferredClientId = "", onClearPreferred
     });
   }, [equipment, search, selectedClientId]);
 
+  function startCreateEquipment() {
+    setEditingEquipment(null);
+    setForm({ ...newEquipmentForm, client_id: preferredClientId || selectedClientId });
+    setFeedback("");
+    setFormOpen(true);
+  }
+
+  function startEditEquipment(item) {
+    setEditingEquipment(item);
+    setForm({
+      client_id: item.client_id,
+      brand: item.brand || "",
+      model: item.model || "",
+      serial_number: item.serial_number || "",
+      installed_on: item.installed_on || "",
+      last_maintenance_on: item.last_maintenance_on || "",
+      notes: item.notes || "",
+    });
+    setFeedback("");
+    setFormOpen(true);
+  }
+
   async function saveEquipment(event) {
     event.preventDefault();
     const client = clients.find((item) => item.id === form.client_id);
     if (!client) return setFeedback("Selecione o cliente ao qual o equipamento pertence.");
     setSaving(true);
     setFeedback("");
-    const nextDate = addYearToDateKey(form.last_maintenance_on || form.installed_on);
-    const { data: authData } = await supabase.auth.getUser();
-    const { error: saveError } = await supabase.from("equipment").insert({
+    const baseDate = form.last_maintenance_on || form.installed_on || null;
+    let linkedPlans = [];
+    if (editingEquipment) {
+      const { data: plans, error: plansError } = await supabase.from("equipment_maintenance_plans")
+        .select("id,interval_months")
+        .eq("equipment_id", editingEquipment.id);
+      if (plansError) {
+        setSaving(false);
+        return setFeedback("Não foi possível validar o plano preventivo deste equipamento.");
+      }
+      linkedPlans = plans || [];
+      if (linkedPlans.length && !baseDate) {
+        setSaving(false);
+        return setFeedback("Indique a data da última manutenção ou da instalação para recalcular o plano.");
+      }
+    }
+    const planDates = linkedPlans.map((plan) => addMonthsToDateKey(baseDate, plan.interval_months)).filter(Boolean).sort();
+    const nextDate = planDates[0] || addYearToDateKey(baseDate);
+    const payload = {
       workspace_id: client.workspace_id,
       client_id: client.id,
       brand: form.brand.trim(),
@@ -54,14 +97,61 @@ export default function EquipmentPage({ preferredClientId = "", onClearPreferred
       last_maintenance_on: form.last_maintenance_on || null,
       next_maintenance_on: nextDate || null,
       notes: form.notes.trim() || null,
-      created_by: authData.user?.id ?? null,
-    });
+    };
+
+    let saveError;
+    if (editingEquipment) {
+      ({ error: saveError } = await supabase.from("equipment").update(payload).eq("id", editingEquipment.id));
+    } else {
+      const { data: authData } = await supabase.auth.getUser();
+      ({ error: saveError } = await supabase.from("equipment").insert({ ...payload, created_by: authData.user?.id ?? null }));
+    }
+    if (saveError) {
+      setSaving(false);
+      return setFeedback(saveError.code === "23505" ? "Já existe um equipamento com esse número de série neste espaço de trabalho." : "Não foi possível guardar o equipamento. Verifique os dados e tente novamente.");
+    }
+
+    let planWarning = false;
+    if (editingEquipment && linkedPlans.length) {
+      const planUpdates = await Promise.all(linkedPlans.map((plan) => supabase.from("equipment_maintenance_plans")
+        .update({
+          base_date: baseDate,
+          next_due_on: addMonthsToDateKey(baseDate, plan.interval_months),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", plan.id)));
+      planWarning = planUpdates.some((result) => result.error);
+    }
+    await Promise.all([
+      mutate(),
+      mutateCache((key) => Array.isArray(key) && (key[0] === "client-equipment" || key[0] === "equipment-maintenance-plans")),
+    ]);
     setSaving(false);
-    if (saveError) return setFeedback(saveError.code === "23505" ? "Já existe um equipamento com esse número de série neste espaço de trabalho." : "Não foi possível guardar o equipamento. Verifique os dados e tente novamente.");
-    await mutate();
     setSelectedClientId(client.id);
     setForm({ ...newEquipmentForm, client_id: client.id });
     setFormOpen(false);
+    setEditingEquipment(null);
+    setFeedback(planWarning ? "Equipamento atualizado; algumas datas do plano não foram atualizadas e devem ser revistas." : editingEquipment ? "Dados do equipamento atualizados." : "Equipamento registado.");
+  }
+
+  async function removeEquipment() {
+    if (!deleteEquipment) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    const { error: removalError } = await supabase.from("equipment").delete().eq("id", deleteEquipment.id);
+    if (removalError) {
+      setDeleteBusy(false);
+      return setDeleteError("Não foi possível eliminar o equipamento. Verifique as permissões e tente novamente.");
+    }
+    const deletedId = deleteEquipment.id;
+    await Promise.all([
+      mutate(),
+      mutateCache((key) => Array.isArray(key) && ["client-equipment", "equipment-history", "equipment-maintenance-plans"].includes(key[0])),
+    ]);
+    setSelectedEquipment((current) => current?.id === deletedId ? null : current);
+    setDeleteBusy(false);
+    setDeleteEquipment(null);
+    setFeedback("Equipamento, plano preventivo e histórico de assistência associados eliminados.");
   }
 
   function clearClientFilter() {
@@ -74,26 +164,27 @@ export default function EquipmentPage({ preferredClientId = "", onClearPreferred
 
   return (
     <div className="page-content">
-      <PageHeading eyebrow="Inventário técnico" title="Equipamentos" description="Pesquise pelo nome do cliente para ver todos os equipamentos, números de série e datas de manutenção." action={<button className="button button-primary" type="button" onClick={() => { setFeedback(""); setFormOpen(true); }}><Plus aria-hidden="true" /> Registar equipamento</button>} />
+      <PageHeading eyebrow="Inventário técnico" title="Equipamentos" description="Pesquise pelo nome do cliente para ver todos os equipamentos, números de série e datas de manutenção." action={<button className="button button-primary" type="button" onClick={startCreateEquipment}><Plus aria-hidden="true" /> Registar equipamento</button>} />
 
       <section className="content-card equipment-search-panel">
         <label className="search-field equipment-search"><Search aria-hidden="true" /><span className="visually-hidden">Pesquisar equipamento ou cliente</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Pesquisar nome do cliente, marca, modelo ou número de série" /></label>
         {selectedClientId && <div className="active-client-filter"><span>Cliente: <strong>{selectedClientName || "selecionado"}</strong></span><button type="button" className="text-action" onClick={clearClientFilter}>Limpar pesquisa</button></div>}
       </section>
 
+      {feedback && !formOpen && <p className="inline-feedback" role="status">{feedback}</p>}
       {error && <ErrorNotice message="Não foi possível carregar os equipamentos." onRetry={() => mutate()} />}
       <section className="content-card equipment-results" aria-label="Resultados de equipamentos">
         <div className="section-title-row"><div><span className="eyebrow">Resultados</span><h2>{filtered.length} equipamento{filtered.length === 1 ? "" : "s"}</h2></div><span className="subtle-label"><CalendarClock aria-hidden="true" /> Plano por manual ou intervalo anual</span></div>
         {isLoading ? <div className="loading-line" aria-label="A carregar equipamentos" /> : filtered.length ? (
-          <div className="table-scroll"><table className="data-table equipment-table"><thead><tr><th>Cliente</th><th>Marca / Modelo</th><th>Número de série</th><th>Última manutenção</th><th>Próxima manutenção</th><th>Estado</th></tr></thead><tbody>
+          <div className="table-scroll"><table className="data-table equipment-table"><thead><tr><th>Cliente</th><th>Marca / Modelo</th><th>Número de série</th><th>Última manutenção</th><th>Próxima manutenção</th><th>Estado</th><th><span className="visually-hidden">Ações</span></th></tr></thead><tbody>
             {filtered.map((item) => <tr key={item.id}>
-              <td><strong>{item.client?.name ?? "Cliente sem nome"}</strong></td><td><button type="button" className="equipment-open-button" onClick={() => setSelectedEquipment(item)}><strong>{item.brand}</strong><small className="table-subline">{item.model}</small></button></td><td><code>{item.serial_number}</code></td><td>{formatDate(item.last_maintenance_on)}</td><td>{formatDate(item.next_maintenance_on)}</td><td><StatusBadge status={maintenanceStatus(item.next_maintenance_on)} /></td>
+              <td><strong>{item.client?.name ?? "Cliente sem nome"}</strong></td><td><button type="button" className="equipment-open-button" onClick={() => setSelectedEquipment(item)}><strong>{item.brand}</strong><small className="table-subline">{item.model}</small></button></td><td><code>{item.serial_number}</code></td><td>{formatDate(item.last_maintenance_on)}</td><td>{formatDate(item.next_maintenance_on)}</td><td><StatusBadge status={maintenanceStatus(item.next_maintenance_on)} /></td><td><div className="table-actions"><button type="button" className="icon-button" aria-label={`Editar ${item.brand} ${item.model}`} title="Editar equipamento" onClick={() => startEditEquipment(item)}><Pencil aria-hidden="true" /></button><button type="button" className="icon-button icon-button-danger" aria-label={`Eliminar ${item.brand} ${item.model}`} title="Eliminar equipamento" onClick={() => { setDeleteEquipment(item); setDeleteError(""); }}><Trash2 aria-hidden="true" /></button></div></td>
             </tr>)}
           </tbody></table></div>
-        ) : <EmptyState icon={Wrench} title={search || selectedClientId ? "Nenhum equipamento encontrado" : "Ainda não há equipamentos registados"} description={search || selectedClientId ? "Experimente outro nome de cliente, marca, modelo ou série." : "Registe equipamentos para começar a acompanhar a manutenção preventiva anual."} action={!clients.length ? undefined : <button className="button button-primary" type="button" onClick={() => setFormOpen(true)}><Plus aria-hidden="true" /> Registar equipamento</button>} />}
+        ) : <EmptyState icon={Wrench} title={search || selectedClientId ? "Nenhum equipamento encontrado" : "Ainda não há equipamentos registados"} description={search || selectedClientId ? "Experimente outro nome de cliente, marca, modelo ou série." : "Registe equipamentos para começar a acompanhar a manutenção preventiva anual."} action={!clients.length ? undefined : <button className="button button-primary" type="button" onClick={startCreateEquipment}><Plus aria-hidden="true" /> Registar equipamento</button>} />}
       </section>
 
-      {formOpen && <Modal title="Registar equipamento" onClose={() => setFormOpen(false)}>
+      {formOpen && <Modal title={editingEquipment ? "Editar equipamento" : "Registar equipamento"} onClose={() => { if (!saving) { setFormOpen(false); setEditingEquipment(null); } }}>
         <form className="modal-body form-stack" onSubmit={saveEquipment}>
           <label>Cliente<select required value={form.client_id} onChange={(event) => setForm({ ...form, client_id: event.target.value })}><option value="">Selecionar cliente…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
           <div className="form-grid"><label>Marca<input required value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} /></label><label>Modelo<input required value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} /></label></div>
@@ -102,9 +193,10 @@ export default function EquipmentPage({ preferredClientId = "", onClearPreferred
           <p className="form-hint">Sem um plano extraído de manual, a aplicação usa um intervalo anual. Quando existir um plano, as datas passam a seguir as periodicidades indicadas no manual.</p>
           <label>Notas<textarea rows="3" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
           {feedback && <p className="form-feedback" role="alert">{feedback}</p>}
-          <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setFormOpen(false)}>Cancelar</button><button className="button button-primary" type="submit" disabled={saving || !clients.length}>{saving ? "A guardar…" : "Guardar equipamento"}</button></div>
+          <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => { setFormOpen(false); setEditingEquipment(null); }}>Cancelar</button><button className="button button-primary" type="submit" disabled={saving || !clients.length}>{saving ? "A guardar…" : editingEquipment ? "Guardar alterações" : "Guardar equipamento"}</button></div>
         </form>
       </Modal>}
+      {deleteEquipment && <ConfirmActionDialog title="Eliminar equipamento?" description={`O equipamento “${deleteEquipment.brand} ${deleteEquipment.model}” será removido, juntamente com o histórico de assistências e os planos preventivos associados. O manual ficará na biblioteca.`} confirmLabel="Eliminar equipamento" busy={deleteBusy} error={deleteError} onCancel={() => { if (!deleteBusy) setDeleteEquipment(null); }} onConfirm={removeEquipment} />}
       {selectedEquipment && <EquipmentDetails equipment={selectedEquipment} onClose={() => setSelectedEquipment(null)} onEquipmentChanged={(changes) => { mutate(); if (changes) setSelectedEquipment((current) => current ? { ...current, ...changes } : current); }} />}
     </div>
   );

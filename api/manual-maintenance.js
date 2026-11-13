@@ -82,7 +82,7 @@ export default async function handler(request, response) {
   } catch (error) {
     const gatewayMessage = String(error?.message ?? "");
     if ((error?.statusCode === 403 || error?.cause?.statusCode === 403) && /AI Gateway requires a valid credit card on file/i.test(gatewayMessage)) {
-      return response.status(503).json({ error: "A análise de manutenção está bloqueada: a Vercel AI Gateway exige um cartão de pagamento válido. Configure a faturação da AI Gateway e tente novamente." });
+      return response.status(503).json({ error: "AI Gateway sem faturação. Ative a faturação para analisar o manual." });
     }
     return response.status(502).json({ error: "A análise não ficou disponível. Tente novamente mais tarde." });
   }

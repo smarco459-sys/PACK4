@@ -3,6 +3,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { BookOpen, Download, FileText, FolderOpen, Pencil, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { extractPdfText } from "../lib/manual-pdf";
+import { identifyManual } from "../lib/manual-analysis";
 import { addYearToDateKey, fetchEquipment, fetchManuals, MANUALS_BUCKET } from "../lib/maintenance-data";
 import { ConfirmActionDialog, EmptyState, ErrorNotice, Modal, PageHeading, StatusBadge } from "./maintenance-ui";
 import ManualMaintenanceReview from "./manual-maintenance-review";
@@ -33,6 +34,7 @@ export default function ManualsPage() {
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [identifying, setIdentifying] = useState(false);
+  const [identificationMessage, setIdentificationMessage] = useState("A extrair o texto do manual…");
   const [planManual, setPlanManual] = useState(null);
   const [feedback, setFeedback] = useState("");
   const inputRef = useRef(null);
@@ -58,12 +60,27 @@ export default function ManualsPage() {
     const draft = { file, brand: "", model: "", title: file.name.replace(/\.pdf$/i, ""), confidence: "review", evidence: "" };
     setActiveManual(draft);
     setIdentifying(true);
+    setIdentificationMessage("A extrair o texto do manual…");
     try {
-      const text = await extractPdfText(file);
+      const text = await extractPdfText(file, {
+        onProgress: ({ phase, pageNumber, totalPages }) => {
+          if (phase === "text") setIdentificationMessage(`A ler o PDF — página ${pageNumber} de ${totalPages}…`);
+          if (phase === "ocr-start") setIdentificationMessage("PDF digitalizado detetado. A preparar OCR local…");
+          if (phase === "ocr") setIdentificationMessage(`OCR local — página ${pageNumber} de ${totalPages}…`);
+        },
+      });
       if (text.length < 30) {
-        setFeedback("Este PDF parece não ter texto pesquisável. Preencha a marca e o modelo manualmente.");
+        setFeedback("Não foi possível reconhecer texto suficiente. Verifique se o PDF está legível ou preencha marca e modelo manualmente.");
         return;
       }
+      const result = identifyManual(text, draft.title);
+      setActiveManual((current) => current ? { ...current, ...result } : current);
+    } catch (cause) {
+      setFeedback(cause.message || "Não foi possível processar o manual. Pode preencher a marca e o modelo manualmente.");
+    } finally {
+      setIdentifying(false);
+    }
+  }
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
       if (!token) throw new Error("A sessão expirou. Inicie sessão novamente.");
@@ -262,7 +279,7 @@ export default function ManualsPage() {
       {activeManual && <Modal title="Confirmar dados do manual" onClose={() => { if (!busy) setActiveManual(null); }}>
         <form className="modal-body form-stack" onSubmit={saveManual}>
           <div className="manual-review-file"><FileText aria-hidden="true" /><div><strong>{activeManual.file.name}</strong><span>{(activeManual.file.size / (1024 * 1024)).toFixed(1)} MB · PDF</span></div></div>
-          {identifying ? <div className="identification-progress" role="status"><span className="spinner" /><span>A analisar o texto do manual…</span></div> : <div className="identification-result"><Sparkles aria-hidden="true" /><span>{activeManual.brand && activeManual.model ? "Sugestão automática pronta — confirme os campos antes de guardar." : "Complete ou corrija a marca e o modelo identificados."}</span><StatusBadge status={activeManual.confidence || "review"} /></div>}
+          {identifying ? <div className="identification-progress" role="status"><span className="spinner" /><span>{identificationMessage}</span></div> : <div className="identification-result"><FileText aria-hidden="true" /><span>{activeManual.brand && activeManual.model ? "Sugestão local pronta — confirme os campos antes de guardar." : "Complete ou corrija a marca e o modelo identificados."}</span><StatusBadge status={activeManual.confidence || "review"} /></div>}
           {activeManual.evidence && <p className="evidence-note">Referência encontrada: “{activeManual.evidence}”</p>}
           <label>Marca<input autoFocus required value={activeManual.brand} onChange={(event) => setActiveManual({ ...activeManual, brand: event.target.value })} /></label>
           <label>Modelo<input required value={activeManual.model} onChange={(event) => setActiveManual({ ...activeManual, model: event.target.value })} /></label>
